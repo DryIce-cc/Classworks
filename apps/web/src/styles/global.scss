@@ -65,10 +65,6 @@ html {
   scroll-behavior: smooth;
 }
 
-.v-app-bar {
-  position: fixed !important;
-}
-
 // 触摸友好的列表项
 .touch-list-item {
   min-height: 56px;
@@ -79,18 +75,4 @@ html {
 .large-touch-target {
   min-height: 56px;
   min-width: 56px;
-}
-
-// 全屏模式样式
-.fullscreen-mode {
-  .v-app-bar {
-    background-color: rgba(var(--v-theme-surface-variant), 0.85) !important;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-  }
-
-  .main-window {
-    padding-top: 16px;
-    padding-bottom: 16px;
-  }
 }

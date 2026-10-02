@@ -146,7 +146,6 @@ export default {
         { name: '政治', order: 6 },
         { name: '历史', order: 7 },
         { name: '地理', order: 8 },
-        { name: '其他', order: 9 },
       ],
     }
   },

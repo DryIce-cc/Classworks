@@ -2,7 +2,7 @@
 <template>
   <v-dialog
     v-model="dialogVisible"
-    :fullscreen="isMobile"
+    :fullscreen="false"
     max-width="900"
     width="auto"
     @click:outside="handleClose"
@@ -13,9 +13,6 @@
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" @click="handleClose" />
       </v-card-title>
-      <v-card-subtitle>
-        {{ autoSave ? autoSavePromptText : manualSavePromptText }}
-      </v-card-subtitle>
       <v-card-text>
         <div class="d-flex">
           <div class="flex-grow-1">
@@ -25,7 +22,7 @@
               auto-grow
               placeholder="使用换行表示分条"
               rows="5"
-              :width="isMobile ? '100%' : '480'"
+              :width="'480'"
               @click="updateCurrentLine"
               @keyup="updateCurrentLine"
             />
@@ -128,7 +125,7 @@
           </div>
 
           <!-- Quick Tools Section -->
-          <div v-if="showQuickTools && !isMobile" class="quick-tools ml-4" style="min-width: 180px">
+          <div v-if="showQuickTools" class="quick-tools ml-4" style="min-width: 180px">
             <!-- Numeric Keypad -->
             <div class="numeric-keypad mb-4">
               <div class="keypad-row">
@@ -219,33 +216,6 @@
         </div>
       </v-card-text>
 
-      <!-- 非今日编辑警告 -->
-      <v-alert
-        v-if="isEditingPastData"
-        type="warning"
-        variant="tonal"
-        class="mx-4 mb-4"
-        border="start"
-        border-color="warning"
-        prominent
-      >
-        <template #prepend />
-        <div class="d-flex flex-column">
-          <div class="text-h6 mb-1">你打算修改历史？</div>
-          <div class="text-body-2">
-            这是
-            {{
-              new Date(
-                currentDateString.slice(0, 4),
-                currentDateString.slice(4, 6) - 1,
-                currentDateString.slice(6, 8),
-              ).toLocaleDateString()
-            }}
-            的作业 • 请谨慎操作，确保不会覆盖重要数据
-          </div>
-        </div>
-      </v-alert>
-
       <div class="text-center text-body-2 text-disabled mb-5">点击空白处完成编辑</div>
     </v-card>
   </v-dialog>
@@ -253,8 +223,6 @@
 
 <script>
 import dataProvider from '@/utils/dataProvider'
-import { getSetting } from '@/utils/settings'
-import { useDisplay } from 'vuetify'
 
 export default {
   name: 'HomeworkEditDialog',
@@ -271,24 +239,12 @@ export default {
       type: String,
       default: '',
     },
-    autoSave: {
-      type: Boolean,
-      default: false,
-    },
-    isEditingPastData: {
-      type: Boolean,
-      default: false,
-    },
     currentDateString: {
       type: String,
       default: '',
     },
   },
   emits: ['update:modelValue', 'save'],
-  setup() {
-    const { mobile } = useDisplay()
-    return { mobile }
-  },
   data() {
     return {
       content: '',
@@ -300,14 +256,6 @@ export default {
     }
   },
   computed: {
-    isMobile() {
-      // 如果启用了强制一体机UI模式，返回false（使用桌面UI）
-      const forceDesktopMode = getSetting('display.forceDesktopMode')
-      if (forceDesktopMode) {
-        return false
-      }
-      return this.mobile
-    },
     dialogVisible: {
       get() {
         return this.modelValue
@@ -336,13 +284,8 @@ export default {
       return this.templateData.commonSubject.books
     },
     showQuickTools() {
-      return getSetting('display.showQuickTools')
-    },
-    autoSavePromptText() {
-      return getSetting('edit.autoSavePromptText')
-    },
-    manualSavePromptText() {
-      return getSetting('edit.manualSavePromptText')
+      // 快捷键盘一律显示
+      return true
     },
   },
   watch: {

@@ -212,21 +212,7 @@ export default {
         { title: 'Serif', value: 'serif' },
       ],
       // 设置项的显示名称映射
-      displayValueMappings: {
-        'display.emptySubjectDisplay': {
-          card: '卡片',
-          button: '按钮',
-        },
-        'theme.mode': {
-          light: '浅色',
-          dark: '深色',
-        },
-        'server.provider': {
-          classworkscloud: 'Classworks云端存储',
-          'kv-local': 'KV本地存储',
-          'kv-server': 'KV远程服务器',
-        },
-      },
+      displayValueMappings: {},
       // 默认图标映射，按设置类型
       defaultIcons: {
         boolean: 'mdi-toggle-switch-outline',

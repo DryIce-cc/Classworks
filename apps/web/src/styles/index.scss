@@ -54,20 +54,14 @@
   }
 }
 
-// 添加卡片悬浮效果
+// 作业卡片悬停：与下方"添加作业"卡片一致（同样的阴影、过渡，缩放略小一点）
 .grid-item .v-card {
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease;
+  transition: all 250ms cubic-bezier(0.2, 0, 0, 1);
+}
 
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15) !important;
-  }
-
-  &:active {
-    transform: translateY(-2px);
-  }
+.grid-item .v-card:hover {
+  transform: scale(1.01);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
 }
 
 // 添加空科目卡片样式
@@ -147,14 +141,23 @@
   }
 }
 
+// 三列独立纵向堆叠：没有网格行，列之间互不干扰；
+// 纵向间距只由每列的 row-gap 决定，处处相等
 .grid-masonry {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  padding: 8px;
-  grid-auto-flow: dense;
-  grid-auto-rows: 1px;
-  align-items: start;
+  display: flex;
+  align-items: flex-start;
+  // 一圈留白用 margin 而不是 padding
+  margin: 10px;
+  padding: 0;
+  column-gap: 8px;
+}
+
+.grid-column {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  row-gap: 11px;
 }
 
 .grid-item {
@@ -178,17 +181,7 @@
   flex-wrap: wrap;
 }
 
-@media (max-width: 1199px) {
-  .grid-masonry {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
 @media (max-width: 799px) {
-  .grid-masonry {
-    grid-template-columns: 1fr;
-  }
-
   .empty-card {
     transform: scale(0.95);
   }
@@ -288,11 +281,18 @@
   line-height: 1.2;
 }
 
+// 下方"添加作业"卡片区：间距参数独立，与上方作业展示区互不影响
 .empty-subjects-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
-  padding: 8px;
+  /* 卡片之间水平间距 */
+  --hw-gap-x: 14px;
+  /* 卡片之间垂直间距 */
+  --hw-gap-y: 16px;
+  /* 卡片区与网页边框的一圈留白 */
+  --hw-page-pad: 16px;
+  gap: var(--hw-gap-y) var(--hw-gap-x);
+  padding: var(--hw-page-pad);
 }
 
 .empty-subject-card {
@@ -308,7 +308,12 @@
 
 .empty-subjects {
   border-top: 1px solid rgba(0, 0, 0, 0.12);
-  padding-top: 1rem;
+  padding-top: 4px;
+}
+
+// 首页主容器去内边距：v-container 自带 16px padding，清零后卡片区自己控制留白
+.main-window.v-container {
+  padding: 0;
 }
 
 .empty-subject-card:not(:disabled):hover {

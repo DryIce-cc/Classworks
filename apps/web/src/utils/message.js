@@ -1,5 +1,3 @@
-import { getSetting } from './settings'
-
 class LogDB {
   constructor() {
     this.logs = []
@@ -52,7 +50,7 @@ async function createMessage(type, title, content = '', options = {}) {
     try {
       await logDB.addLog(message)
       messages.unshift(message)
-      while (messages.length > getSetting('message.maxActiveMessages')) {
+      while (messages.length > 5) {
         messages.pop()
       }
       logCallback?.(messages)
