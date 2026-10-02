@@ -30,7 +30,7 @@
               @keyup="updateCurrentLine"
             />
 
-            <div class="d-flex gap-2 justify-center">
+            <div v-if="showPasteButtons" class="d-flex gap-2 justify-center">
               <v-btn
                 size="small"
                 variant="outlined"
@@ -337,6 +337,9 @@ export default {
     },
     showQuickTools() {
       return getSetting('display.showQuickTools')
+    },
+    showPasteButtons() {
+      return getSetting('display.showPasteButtons')
     },
     autoSavePromptText() {
       return getSetting('edit.autoSavePromptText')
