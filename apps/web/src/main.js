@@ -11,6 +11,9 @@ import { registerPlugins } from '@/plugins'
 import App from './App.vue'
 import GlobalMessage from '@/components/GlobalMessage.vue'
 
+// Directives
+import repeatClick from '@/directives/repeatClick'
+
 // Composables
 import { createApp } from 'vue'
 
@@ -23,5 +26,8 @@ app.use(messageService)
 
 // 全局消息组件在 App.vue 里用到；这里注册一次，别处直接写 <global-message />
 app.component('GlobalMessage', GlobalMessage)
+
+// 按住连发：用在数字小键盘的删除键上
+app.directive('repeat-click', repeatClick)
 
 app.mount('#app')

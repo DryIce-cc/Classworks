@@ -3,7 +3,7 @@
   <v-dialog
     v-model="dialogVisible"
     :fullscreen="false"
-    width="900"
+    width="700"
     max-width="calc(100vw - 48px)"
     content-class="homework-dialog-content"
     persistent
@@ -176,7 +176,6 @@
                   </v-chip>
                 </div>
               </div>
-              <div v-else class="text-center text-body-2 text-disabled mt-2">暂无可用的模板</div>
             </div>
           </div>
 
@@ -189,7 +188,6 @@
                   v-for="n in 3"
                   :key="n"
                   class="keypad-btn"
-                  size="small"
                   variant="tonal"
                   @mousedown.prevent
                   @click="insertAtCursor(String(n))"
@@ -202,7 +200,6 @@
                   v-for="n in 3"
                   :key="n"
                   class="keypad-btn"
-                  size="small"
                   variant="tonal"
                   @mousedown.prevent
                   @click="insertAtCursor(String(n + 3))"
@@ -215,7 +212,6 @@
                   v-for="n in 3"
                   :key="n"
                   class="keypad-btn"
-                  size="small"
                   variant="tonal"
                   @mousedown.prevent
                   @click="insertAtCursor(String(n + 6))"
@@ -224,18 +220,21 @@
                 </v-btn>
               </div>
               <div class="keypad-row">
+                <!-- 图标放默认插槽里，不用 icon 属性：icon 会强制成圆形，和旁边的键位对不上。
+                     触发交给 v-repeat-click，所以这里只留 @mousedown.prevent 保住输入框的焦点 -->
                 <v-btn
+                  v-repeat-click="{ handler: deleteLastChar }"
                   class="keypad-btn"
-                  size="small"
+                  color="error"
                   variant="tonal"
+                  title="删除"
+                  aria-label="删除"
                   @mousedown.prevent
-                  @click="insertAtCursor('-')"
                 >
-                  -
+                  <v-icon icon="mdi-backspace-outline" size="small" />
                 </v-btn>
                 <v-btn
                   class="keypad-btn"
-                  size="small"
                   variant="tonal"
                   @mousedown.prevent
                   @click="insertAtCursor('0')"
@@ -244,13 +243,11 @@
                 </v-btn>
                 <v-btn
                   class="keypad-btn"
-                  color="error"
-                  size="small"
                   variant="tonal"
                   @mousedown.prevent
-                  @click="deleteLastChar"
+                  @click="insertAtCursor('-')"
                 >
-                  ←
+                  -
                 </v-btn>
               </div>
               <div class="keypad-row">
@@ -279,7 +276,6 @@
               <v-btn
                 v-for="text in quickTexts"
                 :key="text"
-                size="small"
                 variant="flat"
                 @mousedown.prevent
                 @click="insertAtCursor(text)"
@@ -290,8 +286,6 @@
           </div>
         </div>
       </v-card-text>
-
-      <div class="text-center text-body-2 text-disabled mb-5">点击空白处完成编辑</div>
     </v-card>
   </v-dialog>
 </template>
@@ -309,7 +303,7 @@ const TAP_SLOP = 10
 // 离控件这么近以内也算点到了它
 const NEAR_PADDING = 30
 // 打开后 5s 内一动不动就自动关掉，防的是误触打开
-const IDLE_CLOSE_DELAY = 5000
+const IDLE_CLOSE_DELAY = 7000
 
 export default {
   name: 'HomeworkEditDialog',
@@ -353,7 +347,7 @@ export default {
       currentLine: '',
       currentLineStart: 0,
       currentLineEnd: 0,
-      quickTexts: ['课', '题', '例', '变', 'T', 'P'],
+      quickTexts: ['课', '题', '张', 'p'],
       pickerOpen: false,
       // 顶部倒计条是否在走，false 表示已经不需要倒计了
       countdownActive: false,
@@ -534,6 +528,10 @@ watch: {
       if (before) {
         if (!before.endsWith('\n')) prefix = '\n\n'
         else if (!before.endsWith('\n\n')) prefix = '\n'
+      } else if (this.content.startsWith('#')) {
+        // 光标在正文最开头，没有 before 可判断；但整段若本来就是以附加科目小节开头，
+        // 新插入的小节照样得和它隔开
+        prefix = '\n\n'
       }
       const text = prefix + `# ${name}\n`
       this.content = this.content.slice(0, start) + text + this.content.slice(end)

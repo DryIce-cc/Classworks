@@ -290,9 +290,11 @@ export default {
       if (dateString === this.state.dateString) return this.state.boardData.homework
       let day = this.state.otherDays.find((d) => d.dateString === dateString)
       if (!day) {
-        day = { dateString, homework: {}, pendingCreate: true }
-        this.state.otherDays.push(day)
+        this.state.otherDays.push({ dateString, homework: {}, pendingCreate: true })
         this.state.otherDays.sort((a, b) => a.dateString.localeCompare(b.dateString))
+        // 从数组里重新取一次，拿的是响应式代理：直接往 push 进去的原始对象上写，
+        // 展示板收不到通知，新加的这一天会等到下次刷新才冒出来
+        day = this.state.otherDays.find((d) => d.dateString === dateString)
         await this.loadOtherDay(day)
       }
       return day.homework

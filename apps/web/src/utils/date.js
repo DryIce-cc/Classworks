@@ -52,5 +52,5 @@ export function formatDayName(dateString) {
   if (weekOffset === -1) return `上周${short}`
   if (weekOffset === 1) return `下周${short}`
   if (weekOffset === 0) return `周${short}`
-  return `${md}（星期${short}）`
+  return `${md}`
 }
