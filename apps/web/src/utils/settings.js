@@ -1,5 +1,5 @@
 // 设置项目前只有「字体大小」一项，存 localStorage；改动通过事件广播给各页面
-// 默认科目列表硬编码在 pages/index.vue 与 SubjectManagementCard.vue
+// 科目清单不在这里，默认值与规整都在 utils/subjects.js
 
 const SETTINGS_STORAGE_KEY = 'Classworks_settings'
 const SETTINGS_CHANGED_EVENT = 'classworks:settings:changed'
@@ -10,7 +10,7 @@ const settingsDefinitions = {
   'font.size': {
     type: 'number',
     default: 18,
-    validate: (value) => value >= 16 && value <= 100,
+    validate: (value) => value >= 16 && value <= 32,
     description: '字体大小',
     icon: 'mdi-format-size',
   },

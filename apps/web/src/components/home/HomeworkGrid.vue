@@ -41,24 +41,27 @@
       </TransitionGroup>
     </div>
 
-    <!-- 尚无作业的科目：点一下开始填写 -->
+    <!-- 可添加作业的科目：尚无内容的直接开始填；启用了多份作业的科目即使已有内容，
+         也留一张「继续添加作业」卡片 -->
     <div ref="emptySubjects" class="empty-subjects mt-4">
       <div class="empty-subjects-grid">
         <TransitionGroup name="v-list">
           <v-card
-            v-for="subject in unusedSubjects"
+            v-for="subject in addableSubjects"
             :key="subject.name"
             border
             rounded="md"
             class="empty-subject-card"
-            @click="$emit('open-dialog', subject.name)"
+            @click="openAddDialog(subject)"
           >
             <v-card-title class="text-subtitle-1">
               {{ subject.name }}
             </v-card-title>
             <v-card-text class="text-center">
               <v-icon color="grey" size="small"> mdi-plus </v-icon>
-              <div class="text-caption text-grey">点击添加作业</div>
+              <div class="text-caption text-grey">
+                {{ hasContent(subject.name) ? '继续添加作业' : '点击添加作业' }}
+              </div>
             </v-card-text>
           </v-card>
         </TransitionGroup>
@@ -77,7 +80,8 @@ export default {
   name: 'HomeworkGrid',
   props: {
     sortedItems: { type: Array, required: true },
-    unusedSubjects: { type: Array, required: true },
+    // 尚无内容的科目，外加启用了多份作业的科目（带附加属性：multiHomework / extraSubjects）
+    addableSubjects: { type: Array, required: true },
     contentStyle: { type: Object, default: () => ({}) },
     // 作业编辑面板开着时页面不能动，自动上滑也一并停掉
     paused: { type: Boolean, default: false },
@@ -169,16 +173,29 @@ export default {
       this._scrollTimer = 0
     },
 
+    // 底部这张卡片：启用了多份作业的科目从这儿进来，正文末尾多留一个空行，
+    // 好在已有内容下面另起一份，而不是紧跟着最后一行写
+    openAddDialog(subject) {
+      this.$emit('open-dialog', subject.name, {
+        appendBlankLines: subject.multiHomework ? 2 : 1,
+      })
+    },
+
+    // 该科目在展示板上已经有内容卡片了没有：用来区分「点击添加作业」和「继续添加作业」
+    hasContent(name) {
+      return this.sortedItems.some((item) => item.key === name)
+    },
+
     // 「点击添加作业」卡片还露在视野里、且页面没滑到顶，就该把它上滑出去
     shouldHideEmptySubjects() {
       const el = this.$refs.emptySubjects
-      if (!el || !this.unusedSubjects?.length) return false
+      if (!el || !this.addableSubjects?.length) return false
       if (window.scrollY <= 0) return false
       const rect = el.getBoundingClientRect()
-      // 上下都出了视野都不算「显示在可视区域」；
-      // 只露一条边就当已经出去了，免得正好停在边界上反复触发
-      return rect.bottom > 1 && rect.top < window.innerHeight - 1
+      // 上下都出了视野都不算「显示在可视区域」
+      return rect.bottom > 0 && rect.top < window.innerHeight
     },
+
 
     // 往页首方向滚时，内容整体是往下移的，所以是把整块卡片区推出视口下沿。
     // 要滚的距离超过剩下的高度，就只能到页首为止。

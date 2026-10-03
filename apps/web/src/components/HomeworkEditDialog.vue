@@ -112,6 +112,24 @@
               </v-btn>
             </div>
 
+            <!-- 附加科目：点一下插入「# 附加科目名的作业」小节，光标落在小节里的新行 -->
+            <div v-if="extraSubjects.length" class="extra-subjects mt-4">
+              <div class="extra-subjects-caption">附加科目</div>
+              <div class="d-flex flex-wrap ga-2 mt-1">
+                <v-chip
+                  v-for="name in extraSubjects"
+                  :key="name"
+                  color="primary"
+                  size="small"
+                  variant="flat"
+                  @mousedown.prevent
+                  @click="insertExtraSubject(name)"
+                >
+                  {{ name }}
+                </v-chip>
+              </div>
+            </div>
+
             <!-- Template Buttons Section -->
             <div v-if="templateData" class="mt-4">
               <div v-if="hasTemplates" class="template-buttons">
@@ -310,6 +328,17 @@ export default {
       type: String,
       default: '',
     },
+    // 正文末尾至少留几个空行，方便接着写下一条。
+    // 普通入口 1；从「继续添加作业」卡片进来 2，好和已有内容隔开另起一份
+    appendBlankLines: {
+      type: Number,
+      default: 1,
+    },
+    // 本科目的附加科目名称，给成一键插入「# 名字的作业」小节用
+    extraSubjects: {
+      type: Array,
+      default: () => [],
+    },
   },
   emits: ['update:modelValue', 'save'],
   data() {
@@ -483,9 +512,39 @@ watch: {
         console.error('读取作业失败:', error)
       }
       this.initialDrafts[dateString] = content
-      // 最后一行不是空行时，在文末补一个空行，方便接着写下一条
-      this.drafts[dateString] = content === '' || content.endsWith('\n') ? content : content + '\n'
+      this.drafts[dateString] = this.padTrailingBlankLines(content)
     },
+    // 正文末尾补足空行，已经够了就只补差额。空正文不动（没什么可隔开的）
+    padTrailingBlankLines(content) {
+      if (!content) return content
+      const want = Math.max(0, Math.trunc(this.appendBlankLines))
+      const have = /(\n*)$/.exec(content)[1].length
+      return have >= want ? content : content + '\n'.repeat(want - have)
+    },
+
+    // 追加一个附加科目小节：小标题独占一段，渲染层才认得出它是附加科目的作业。
+    // 光标前已经有内容时先补一个空行当分隔，再另起一行写小标题，光标落在小标题下面那行
+    insertExtraSubject(name) {
+      const textarea = this.getTextarea()
+      if (!textarea || !name) return
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      const before = this.content.slice(0, start)
+      let prefix = ''
+      if (before) {
+        if (!before.endsWith('\n')) prefix = '\n\n'
+        else if (!before.endsWith('\n\n')) prefix = '\n'
+      }
+      const text = prefix + `# ${name}\n`
+      this.content = this.content.slice(0, start) + text + this.content.slice(end)
+      const position = start + text.length
+      this.$nextTick(() => {
+        textarea.focus()
+        textarea.setSelectionRange(position, position)
+        this.updateCurrentLine()
+      })
+    },
+
     // 过去的日子也翻得动，所以两个方向都不设限
     shiftDate(offset) {
       this.goToDate(shiftDateString(this.currentDate, offset))
@@ -827,14 +886,15 @@ watch: {
         console.error('Failed to read clipboard:', error)
       }
     },
-    // 从剪贴板粘贴并直接保存关闭
+    // 从剪贴板粘贴并直接保存关闭。
+    // 关闭走 handleClose，别自己 emit：本次编辑可能改到多天（比如翻到另一天改过），
+    // 那些草稿也在 handleClose 的保存范围里，只交回今天会把别的改动丢掉
     async pasteAndComplete() {
       try {
         const result = await this.buildContentWithPaste()
         if (!result) return
         this.content = result.content
-        this.$emit('save', [{ dateString: this.currentDate, content: this.content.trim() }])
-        this.dialogVisible = false
+        this.handleClose()
       } catch (error) {
         console.error('Failed to read clipboard:', error)
       }
@@ -851,7 +911,7 @@ watch: {
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 1px;
   overflow: hidden;
   /* 纯装饰，别挡住标题栏的点击 */
   pointer-events: none;
@@ -909,6 +969,13 @@ watch: {
   justify-content: center;
   gap: 8px;
   margin-top: 8px;
+}
+
+/* 附加科目按钮区：小标题沿用日期小标题的外观，两者都是「往正文里加东西」 */
+.extra-subjects-caption {
+  font-size: 0.8rem;
+  opacity: 0.6;
+  line-height: 1.5;
 }
 
 .template-buttons {

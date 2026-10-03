@@ -50,7 +50,7 @@
     <v-container class="main-window flex-grow-1 no-select bloom-container" fluid>
       <homework-grid
         :sorted-items="sortedItems"
-        :unused-subjects="unusedSubjects"
+        :addable-subjects="addableSubjects"
         :content-style="state.contentStyle"
         :paused="state.dialogVisible"
         @open-dialog="openDialog"
@@ -62,6 +62,8 @@
     v-model="state.dialogVisible"
     :title="currentEditSubject"
     :initial-date="state.dateString"
+    :append-blank-lines="state.editAppendBlankLines"
+    :extra-subjects="currentEditExtraSubjects"
     @save="handleHomeworkSave"
   />
 </template>
@@ -79,6 +81,7 @@ const HomeworkEditDialog = defineAsyncComponent({
 import dataProvider from '@/utils/dataProvider'
 import { formatDayName } from '@/utils/date'
 import { getSetting, watchSettings, setSetting } from '@/utils/settings'
+import { cloneDefaultSubjects, normalizeSubjects } from '@/utils/subjects'
 
 // 不在科目列表里的科目统一排在这个位置，即所有列表科目之后
 const LAST_ORDER = 9998
@@ -90,28 +93,19 @@ export default {
     HomeworkGrid,
   },
   data() {
-    const defaultSubjects = [
-      { name: '语文', order: 0 },
-      { name: '数学', order: 1 },
-      { name: '英语', order: 2 },
-      { name: '物理', order: 3 },
-      { name: '化学', order: 4 },
-      { name: '生物', order: 5 },
-      { name: '政治', order: 6 },
-      { name: '历史', order: 7 },
-      { name: '地理', order: 8 },
-      { name: '其他', order: 9 },
-    ]
     return {
       currentEditSubject: null,
       state: {
         boardData: { homework: {} },
         dialogVisible: false,
         dateString: '',
+        // 本次打开编辑面板要在正文末尾留几个空行：普通入口 1，
+        // 从「继续添加作业」卡片进来 2，好和已有内容隔开另起一份
+        editAppendBlankLines: 1,
         fontSize: getSetting('font.size'),
         contentStyle: { 'font-size': `${getSetting('font.size')}px` },
         selectedDateObj: new Date(),
-        availableSubjects: defaultSubjects,
+        availableSubjects: cloneDefaultSubjects(),
         // 展示板所看的这一天以外的每一天（后续日期预加载 + 面板里翻到过去的日子），
         // 按日期升序
         otherDays: [],
@@ -154,11 +148,18 @@ export default {
       return items
     },
 
-    unusedSubjects() {
+    // 底部卡片：还没内容的科目，外加启用了多份作业的科目（已有内容也常驻一张「继续添加作业」）
+    addableSubjects() {
       const used = this.storedSubjectNames()
       return this.state.availableSubjects
-        .filter((subject) => !used.has(subject.name))
+        .filter((subject) => subject.multiHomework || !used.has(subject.name))
         .sort((a, b) => a.order - b.order)
+    },
+
+    // 当前编辑科目的附加科目，交给编辑面板做一键插入按钮
+    currentEditExtraSubjects() {
+      const subject = this.state.availableSubjects.find((s) => s.name === this.currentEditSubject)
+      return subject?.extraSubjects || []
     },
     // 展示板只呈现「所看的这一天 + 更晚的日子」。
     // 更早的日子只可能是编辑面板里翻回去改的：存了档，但不该在这块板上冒出来。
@@ -369,16 +370,19 @@ export default {
       try {
         const subjectsResponse = await dataProvider.loadData('classworks-config-subject')
         if (subjectsResponse && Array.isArray(subjectsResponse)) {
-          this.state.availableSubjects = subjectsResponse
+          // 规整顺带补齐附加属性，旧存档里的科目也能用上多份作业和附加科目
+          this.state.availableSubjects = normalizeSubjects(subjectsResponse)
         }
       } catch (error) {
         console.warn('加载科目配置失败:', error)
       }
     },
 
-    // 编辑入口，key 就是科目名；对话框初始停在展示板正在看的那天，可自行前后翻日期
-    openDialog(key) {
+    // 编辑入口，key 就是科目名；对话框初始停在展示板正在看的那天，可自行前后翻日期。
+    // appendBlankLines 由卡片决定：底部「继续添加作业」进来要 2 个空行，其余 1 个
+    openDialog(key, options = {}) {
       this.currentEditSubject = key
+      this.state.editAppendBlankLines = options.appendBlankLines || 1
       this.state.dialogVisible = true
     },
 

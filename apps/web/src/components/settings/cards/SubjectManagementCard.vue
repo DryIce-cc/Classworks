@@ -92,6 +92,13 @@
 
             <template #append>
               <v-btn
+                :icon="isExpanded(subject) ? 'mdi-chevron-up' : 'mdi-tune-variant'"
+                size="small"
+                title="附加属性"
+                variant="text"
+                @click="toggleExpand(subject)"
+              />
+              <v-btn
                 color="error"
                 icon="mdi-delete"
                 size="small"
@@ -99,6 +106,42 @@
                 @click="deleteSubject(subject)"
               />
             </template>
+
+            <!-- 附加属性：点右侧的调节图标展开 -->
+            <v-expand-transition>
+              <div v-if="isExpanded(subject)" class="subject-extras">
+                <v-switch
+                  v-model="subject.multiHomework"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  label="启用多份作业：底部常驻「继续添加作业」卡片，从那里进来时正文末尾留两个空行"
+                />
+                <div class="text-caption text-medium-emphasis mt-3 mb-1">附加科目名称</div>
+                <div class="text-caption text-medium-emphasis mb-2">
+                  填了之后，编辑面板里会出现一键按钮，往本科目下追加「# 附加科目名的作业」小节
+                </div>
+                <v-text-field
+                  v-model="newExtraSubject"
+                  density="compact"
+                  hide-details
+                  placeholder="输入附加科目名称后回车，如：历史（合格班）"
+                  variant="outlined"
+                  @keyup.enter="addExtraSubject(subject)"
+                />
+                <div v-if="subject.extraSubjects.length" class="d-flex flex-wrap ga-2 mt-3">
+                  <v-chip
+                    v-for="name in subject.extraSubjects"
+                    :key="name"
+                    closable
+                    size="small"
+                    @click:close="removeExtraSubject(subject, name)"
+                  >
+                    {{ name }}
+                  </v-chip>
+                </div>
+              </div>
+            </v-expand-transition>
           </v-list-item>
         </v-list>
       </v-card-text>
@@ -114,6 +157,7 @@
 <script>
 import SettingsCard from '@/components/SettingsCard.vue'
 import dataProvider from '@/utils/dataProvider.js'
+import { cloneDefaultSubjects, normalizeSubjects } from '@/utils/subjects.js'
 
 export default {
   name: 'SubjectManagementCard',
@@ -128,21 +172,13 @@ export default {
       subjects: [],
       originalSubjects: null,
       newSubjectName: '',
+      // 展开附加属性的科目：order 作键，和列表的 v-for 一样
+      expandedOrder: null,
+      // 正在给哪个科目录入附加科目名
+      newExtraSubject: '',
       showSnackbar: false,
       snackbarText: '',
       snackbarColor: 'success',
-      defaultSubjects: [
-        { name: '语文', order: 0 },
-        { name: '数学', order: 1 },
-        { name: '英语', order: 2 },
-        { name: '物理', order: 3 },
-        { name: '化学', order: 4 },
-        { name: '生物', order: 5 },
-        { name: '政治', order: 6 },
-        { name: '历史', order: 7 },
-        { name: '地理', order: 8 },
-        { name: '其他', order: 9 },
-      ],
     }
   },
 
@@ -160,23 +196,27 @@ export default {
   },
 
   methods: {
+    isExpanded(subject) {
+      return this.expandedOrder === subject.order
+    },
+
+    toggleExpand(subject) {
+      this.expandedOrder = this.isExpanded(subject) ? null : subject.order
+    },
+
     async loadConfig() {
       this.loading = true
       try {
         const response = await dataProvider.loadData('classworks-config-subject')
         // 读不到 key 时 dataProvider 会返回 { success: false }，必须判 success 而不是判真值
         if (response.success === false) {
-          this.subjects = JSON.parse(JSON.stringify(this.defaultSubjects))
+          this.subjects = cloneDefaultSubjects()
           this.originalSubjects = JSON.parse(JSON.stringify(this.subjects))
           this.showMessage('使用默认配置', 'info')
           return
         }
-        this.subjects = response
-          .map((subject, index) => ({
-            name: subject.name,
-            order: subject.order ?? index,
-          }))
-          .sort((a, b) => a.order - b.order)
+        // 规整顺带补齐附加属性：旧存档里没有的字段在这里长出来，不会被读丢
+        this.subjects = normalizeSubjects(response)
         this.originalSubjects = JSON.parse(JSON.stringify(this.subjects))
         this.showMessage('配置已加载', 'success')
       } catch (error) {
@@ -209,14 +249,16 @@ export default {
     },
 
     addSubject() {
-      if (!this.newSubjectName) return
+      const name = (this.newSubjectName || '').trim()
+      if (!name) return
 
-      const subject = {
-        name: this.newSubjectName,
+      this.subjects.push({
+        name,
         order: this.subjects.length,
-      }
+        multiHomework: false,
+        extraSubjects: [],
+      })
 
-      this.subjects.push(subject)
       this.newSubjectName = ''
     },
 
@@ -225,6 +267,22 @@ export default {
       if (index > -1) {
         this.subjects[index] = { ...subject }
       }
+    },
+
+    // 附加科目名去空白、挡重；空名和重复名直接忽略，不给提示吵人
+    addExtraSubject(subject) {
+      const name = (this.newExtraSubject || '').trim()
+      if (!name || subject.extraSubjects.includes(name)) {
+        this.newExtraSubject = ''
+        return
+      }
+      subject.extraSubjects.push(name)
+      this.newExtraSubject = ''
+    },
+
+    removeExtraSubject(subject, name) {
+      const index = subject.extraSubjects.indexOf(name)
+      if (index > -1) subject.extraSubjects.splice(index, 1)
     },
 
     deleteSubject(subject) {
@@ -236,11 +294,15 @@ export default {
           s.order = i
         })
       }
+      if (this.expandedOrder === subject.order) this.expandedOrder = null
     },
 
     moveSubject(index, direction) {
       const newIndex = index + direction
       if (newIndex >= 0 && newIndex < this.subjects.length) {
+        // 顺序跟着挪，展开项要跟着换到新位置，否则会展开到别的科目上
+        if (this.expandedOrder === index) this.expandedOrder = newIndex
+        else if (this.expandedOrder === newIndex) this.expandedOrder = index
         // 交换位置
         const temp = this.subjects[index]
         this.subjects[index] = this.subjects[newIndex]
@@ -253,7 +315,8 @@ export default {
     },
 
     resetToDefault() {
-      this.subjects = JSON.parse(JSON.stringify(this.defaultSubjects))
+      this.subjects = cloneDefaultSubjects()
+      this.expandedOrder = null
       this.showMessage('已重置为默认科目列表', 'info')
     },
   },
@@ -267,5 +330,11 @@ export default {
 
 .v-list-item:last-child {
   border-bottom: none;
+}
+
+/* 附加属性展开区：占满内容列，缩进一点以区别于科目名那一行 */
+.subject-extras {
+  width: 100%;
+  padding: 4px 0 12px 8px;
 }
 </style>
