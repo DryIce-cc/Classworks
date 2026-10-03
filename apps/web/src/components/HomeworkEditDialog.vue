@@ -1,4 +1,4 @@
-# 创建新的作业编辑对话框组件
+<!-- 作业编辑对话框：上半部分是当天，下半部分是未来某天（可切换日期） -->
 <template>
   <v-dialog
     v-model="dialogVisible"
@@ -7,212 +7,268 @@
     width="auto"
     @click:outside="handleClose"
   >
-    <v-card border>
+    <v-card border class="hw-dialog">
       <v-card-title class="d-flex align-center">
         {{ title }}
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" @click="handleClose" />
       </v-card-title>
-      <v-card-text>
-        <div class="d-flex">
-          <div class="flex-grow-1">
+
+      <!-- 滚动区只放两个编辑框和日期控件，右侧快捷键盘与下方工具栏都不参与滚动 -->
+      <div class="editor-row">
+        <v-card-text class="dialog-body">
+          <div class="date-caption">{{ dayName(primaryDate) }}的作业</div>
+          <v-textarea
+            ref="primaryRef"
+            :model-value="drafts[primaryDate]"
+            auto-grow
+            placeholder="使用换行表示分条"
+            rows="5"
+            :width="'480'"
+            class="hw-area"
+            @update:model-value="setDraft(primaryDate, $event)"
+            @update:focused="onSideFocused('primary', $event)"
+            @click="updateCurrentLine"
+            @keyup="updateCurrentLine"
+          />
+
+          <template v-if="allowFuture">
+            <div class="date-caption mt-3">
+              {{ dayName(secondaryDate) }}的作业
+              <v-spacer />
+              <v-btn
+                icon="mdi-chevron-left"
+                size="small"
+                variant="text"
+                title="查看昨天"
+                :disabled="!canStepSecondary(-1)"
+                @click="stepSecondary(-1)"
+              />
+              <v-menu location="bottom">
+                <template #activator="{ props: activatorProps }">
+                  <v-btn
+                    v-bind="activatorProps"
+                    icon="mdi-calendar"
+                    size="small"
+                    variant="text"
+                    title="选择日期"
+                  />
+                </template>
+                <v-card border rounded="md">
+                  <v-date-picker
+                    :model-value="secondaryDateObj"
+                    :min="minSecondaryObj"
+                    color="primary"
+                    @update:model-value="selectSecondaryDate"
+                  />
+                </v-card>
+              </v-menu>
+              <v-btn
+                icon="mdi-chevron-right"
+                size="small"
+                variant="text"
+                title="查看明天"
+                @click="stepSecondary(1)"
+              />
+            </div>
             <v-textarea
-              ref="inputRef"
-              v-model="content"
+              ref="secondaryRef"
+              :model-value="drafts[secondaryDate]"
               auto-grow
               placeholder="使用换行表示分条"
-              rows="5"
+              rows="2"
               :width="'480'"
+              class="hw-area"
+              @update:model-value="setDraft(secondaryDate, $event)"
+              @update:focused="onSideFocused('secondary', $event)"
               @click="updateCurrentLine"
               @keyup="updateCurrentLine"
             />
+          </template>
+        </v-card-text>
 
-            <div class="d-flex gap-2 justify-center">
+        <!-- Quick Tools Section -->
+        <div v-if="showQuickTools" class="quick-tools ml-4" style="min-width: 180px">
+          <!-- Numeric Keypad -->
+          <div class="numeric-keypad mb-4">
+            <div class="keypad-row">
               <v-btn
+                v-for="n in 3"
+                :key="n"
+                class="keypad-btn"
                 size="small"
-                variant="outlined"
-                prepend-icon="mdi-content-paste"
-                @click="pasteFromClipboard"
+                variant="tonal"
+                @click="insertAtCursor(String(n))"
               >
-                粘贴
-              </v-btn>
-              <v-btn
-                size="small"
-                variant="elevated"
-                color="primary"
-                prepend-icon="mdi-content-paste"
-                @click="pasteAndComplete"
-              >
-                粘贴并完成
+                {{ n }}
               </v-btn>
             </div>
+            <div class="keypad-row">
+              <v-btn
+                v-for="n in 3"
+                :key="n"
+                class="keypad-btn"
+                size="small"
+                variant="tonal"
+                @click="insertAtCursor(String(n + 3))"
+              >
+                {{ n + 3 }}
+              </v-btn>
+            </div>
+            <div class="keypad-row">
+              <v-btn
+                v-for="n in 3"
+                :key="n"
+                class="keypad-btn"
+                size="small"
+                variant="tonal"
+                @click="insertAtCursor(String(n + 6))"
+              >
+                {{ n + 6 }}
+              </v-btn>
+            </div>
+            <div class="keypad-row">
+              <v-btn class="keypad-btn" size="small" variant="tonal" @click="insertAtCursor('-')">
+                -
+              </v-btn>
+              <v-btn class="keypad-btn" size="small" variant="tonal" @click="insertAtCursor('0')">
+                0
+              </v-btn>
+              <v-btn
+                class="keypad-btn"
+                color="error"
+                size="small"
+                variant="tonal"
+                @click="deleteLastChar"
+              >
+                ←
+              </v-btn>
+            </div>
+            <div class="keypad-row">
+              <v-btn
+                class="keypad-btn space-btn"
+                size="small"
+                variant="tonal"
+                @click="insertAtCursor(' ')"
+              >
+                空格
+              </v-btn>
+              <v-btn
+                class="keypad-btn space-btn"
+                size="small"
+                variant="tonal"
+                @click="insertAtCursor('\n')"
+              >
+                换行
+              </v-btn>
+            </div>
+          </div>
 
-            <!-- Template Buttons Section -->
-            <div v-if="templateData" class="mt-4">
-              <div v-if="hasTemplates" class="template-buttons">
-                <!-- Subject specific books -->
-                <template v-if="subjectBooks">
-                  <div v-for="(pages, book) in subjectBooks" :key="book" class="button-group">
-                    <v-chip
-                      :color="isBookSelected(book) ? 'success' : 'default'"
-                      :variant="isBookSelected(book) ? 'elevated' : 'flat'"
-                      class="ma-1 book-chip"
-                      @click="handleBookClick(book)"
-                    >
-                      {{ book }}
-                    </v-chip>
+          <div class="d-flex flex-wrap gap-1">
+            <v-btn
+              v-for="text in quickTexts"
+              :key="text"
+              size="small"
+              variant="flat"
+              @click="insertAtCursor(text)"
+            >
+              {{ text }}
+            </v-btn>
+          </div>
+        </div>
+        </div>
 
-                    <!-- Show pages only if book is selected -->
-                    <div v-if="isBookSelected(book)" class="pages-container mt-2">
-                      <v-chip
-                        v-for="page in pages"
-                        :key="page"
-                        :color="isPageSelected(book, page) ? 'info' : 'default'"
-                        :variant="isPageSelected(book, page) ? 'elevated' : 'flat'"
-                        class="ma-1"
-                        @click="handlePageClick(book, page)"
-                      >
-                        {{ page }}
-                      </v-chip>
-                    </div>
-                  </div>
-                </template>
+      <!-- 粘贴与模板固定在滚动区之外，滚动到哪个编辑框都能用 -->
+      <v-card-text class="tool-bar">
+        <div class="paste-bar">
+          <v-btn size="small" variant="outlined" prepend-icon="mdi-content-paste" @click="pasteFromClipboard">
+            粘贴
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="elevated"
+            color="primary"
+            prepend-icon="mdi-content-paste"
+            @click="pasteAndComplete"
+          >
+            粘贴并完成
+          </v-btn>
+        </div>
 
-                <!-- Common books -->
-                <template v-if="commonBooks">
-                  <div v-for="(pages, book) in commonBooks" :key="book" class="button-group">
-                    <v-chip
-                      :color="isBookSelected(book) ? 'success' : 'default'"
-                      :variant="isBookSelected(book) ? 'elevated' : 'flat'"
-                      class="ma-1 book-chip"
-                      @click="handleBookClick(book)"
-                    >
-                      {{ book }}
-                    </v-chip>
+        <!-- Template Buttons Section -->
+        <div v-if="templateData" class="mt-4">
+          <div v-if="hasTemplates" class="template-buttons">
+            <!-- Subject specific books -->
+            <template v-if="subjectBooks">
+              <div v-for="(pages, book) in subjectBooks" :key="book" class="button-group">
+                <v-chip
+                  :color="isBookSelected(book) ? 'success' : 'default'"
+                  :variant="isBookSelected(book) ? 'elevated' : 'flat'"
+                  class="ma-1 book-chip"
+                  @click="handleBookClick(book)"
+                >
+                  {{ book }}
+                </v-chip>
 
-                    <!-- Show pages only if book is selected -->
-                    <div v-if="isBookSelected(book)" class="pages-container mt-2">
-                      <v-chip
-                        v-for="page in pages"
-                        :key="page"
-                        :color="isPageSelected(book, page) ? 'info' : 'default'"
-                        :variant="isPageSelected(book, page) ? 'elevated' : 'flat'"
-                        class="ma-1"
-                        @click="handlePageClick(book, page)"
-                      >
-                        {{ page }}
-                      </v-chip>
-                    </div>
-                  </div>
-                </template>
-
-                <!-- Actions -->
-                <div v-if="templateData.actions?.length" class="button-group">
+                <!-- Show pages only if book is selected -->
+                <div v-if="isBookSelected(book)" class="pages-container mt-2">
                   <v-chip
-                    v-for="action in templateData.actions"
-                    :key="action"
+                    v-for="page in pages"
+                    :key="page"
+                    :color="isPageSelected(book, page) ? 'info' : 'default'"
+                    :variant="isPageSelected(book, page) ? 'elevated' : 'flat'"
                     class="ma-1"
-                    color="primary"
-                    variant="flat"
-                    @click="insertTemplate(action)"
+                    @click="handlePageClick(book, page)"
                   >
-                    {{ action }}
+                    {{ page }}
                   </v-chip>
                 </div>
               </div>
-              <div v-else class="text-center text-body-2 text-disabled mt-2">暂无可用的模板</div>
-            </div>
-          </div>
+            </template>
 
-          <!-- Quick Tools Section -->
-          <div v-if="showQuickTools" class="quick-tools ml-4" style="min-width: 180px">
-            <!-- Numeric Keypad -->
-            <div class="numeric-keypad mb-4">
-              <div class="keypad-row">
-                <v-btn
-                  v-for="n in 3"
-                  :key="n"
-                  class="keypad-btn"
-                  size="small"
-                  variant="tonal"
-                  @click="insertAtCursor(String(n))"
+            <!-- Common books -->
+            <template v-if="commonBooks">
+              <div v-for="(pages, book) in commonBooks" :key="book" class="button-group">
+                <v-chip
+                  :color="isBookSelected(book) ? 'success' : 'default'"
+                  :variant="isBookSelected(book) ? 'elevated' : 'flat'"
+                  class="ma-1 book-chip"
+                  @click="handleBookClick(book)"
                 >
-                  {{ n }}
-                </v-btn>
-              </div>
-              <div class="keypad-row">
-                <v-btn
-                  v-for="n in 3"
-                  :key="n"
-                  class="keypad-btn"
-                  size="small"
-                  variant="tonal"
-                  @click="insertAtCursor(String(n + 3))"
-                >
-                  {{ n + 3 }}
-                </v-btn>
-              </div>
-              <div class="keypad-row">
-                <v-btn
-                  v-for="n in 3"
-                  :key="n"
-                  class="keypad-btn"
-                  size="small"
-                  variant="tonal"
-                  @click="insertAtCursor(String(n + 6))"
-                >
-                  {{ n + 6 }}
-                </v-btn>
-              </div>
-              <div class="keypad-row">
-                <v-btn class="keypad-btn" size="small" variant="tonal" @click="insertAtCursor('-')">
-                  -
-                </v-btn>
-                <v-btn class="keypad-btn" size="small" variant="tonal" @click="insertAtCursor('0')">
-                  0
-                </v-btn>
-                <v-btn
-                  class="keypad-btn"
-                  color="error"
-                  size="small"
-                  variant="tonal"
-                  @click="deleteLastChar"
-                >
-                  ←
-                </v-btn>
-              </div>
-              <div class="keypad-row">
-                <v-btn
-                  class="keypad-btn space-btn"
-                  size="small"
-                  variant="tonal"
-                  @click="insertAtCursor(' ')"
-                >
-                  空格
-                </v-btn>
-                <v-btn
-                  class="keypad-btn space-btn"
-                  size="small"
-                  variant="tonal"
-                  @click="insertAtCursor('\n')"
-                >
-                  换行
-                </v-btn>
-              </div>
-            </div>
+                  {{ book }}
+                </v-chip>
 
-            <div class="d-flex flex-wrap gap-1">
-              <v-btn
-                v-for="text in quickTexts"
-                :key="text"
-                size="small"
+                <!-- Show pages only if book is selected -->
+                <div v-if="isBookSelected(book)" class="pages-container mt-2">
+                  <v-chip
+                    v-for="page in pages"
+                    :key="page"
+                    :color="isPageSelected(book, page) ? 'info' : 'default'"
+                    :variant="isPageSelected(book, page) ? 'elevated' : 'flat'"
+                    class="ma-1"
+                    @click="handlePageClick(book, page)"
+                  >
+                    {{ page }}
+                  </v-chip>
+                </div>
+              </div>
+            </template>
+
+            <!-- Actions -->
+            <div v-if="templateData.actions?.length" class="button-group">
+              <v-chip
+                v-for="action in templateData.actions"
+                :key="action"
+                class="ma-1"
+                color="primary"
                 variant="flat"
-                @click="insertAtCursor(text)"
+                @click="insertTemplate(action)"
               >
-                {{ text }}
-              </v-btn>
+                {{ action }}
+              </v-chip>
             </div>
           </div>
+          <div v-else class="text-center text-body-2 text-disabled mt-2">暂无可用的模板</div>
         </div>
       </v-card-text>
 
@@ -223,6 +279,7 @@
 
 <script>
 import dataProvider from '@/utils/dataProvider'
+import { formatDayName, parseDateString, shiftDateString, toDateString } from '@/utils/date'
 
 export default {
   name: 'HomeworkEditDialog',
@@ -243,11 +300,32 @@ export default {
       type: String,
       default: '',
     },
+    // 存储用的条目 key：一般就是科目名，没有单独传时退回标题
+    subjectKey: {
+      type: String,
+      default: '',
+    },
+    // 后续日期的作业，形如 [{ dateString, homework }]，按日期升序
+    futureDays: {
+      type: Array,
+      default: () => [],
+    },
+    // 只有当天视图才装载了后续日期的作业，查看其他日期时不能编辑未来
+    allowFuture: {
+      type: Boolean,
+      default: false,
+    },
   },
   emits: ['update:modelValue', 'save'],
   data() {
     return {
-      content: '',
+      // 日期 -> 正文，切换日期时保留草稿
+      drafts: {},
+      initialDrafts: {},
+      primaryDate: '',
+      secondaryDate: '',
+      // 决定粘贴、模板、快捷键盘作用于哪个编辑框
+      focusedSide: 'primary',
       templateData: null,
       currentLine: '',
       currentLineStart: 0,
@@ -267,6 +345,32 @@ export default {
     subject() {
       // 标题直接就是科目名称
       return this.title
+    },
+    storageKey() {
+      return this.subjectKey || this.title
+    },
+    // 当前聚焦编辑框的日期
+    activeDate() {
+      return this.focusedSide === 'primary' ? this.primaryDate : this.secondaryDate
+    },
+    // 模板、粘贴、快捷键盘都走这一个入口，作用在聚焦的编辑框上
+    content: {
+      get() {
+        return this.drafts[this.activeDate] || ''
+      },
+      set(value) {
+        this.drafts[this.activeDate] = value
+      },
+    },
+    secondaryDateObj() {
+      return parseDateString(this.secondaryDate)
+    },
+    // 未来编辑框不能回到当天，否则和上面的编辑框冲突
+    minSecondaryDate() {
+      return shiftDateString(this.primaryDate, 1)
+    },
+    minSecondaryObj() {
+      return parseDateString(this.minSecondaryDate)
     },
     hasTemplates() {
       return !!(this.templateData?.actions?.length || this.subjectBooks || this.commonBooks)
@@ -291,9 +395,26 @@ export default {
   watch: {
     async modelValue(newValue) {
       if (newValue) {
-        // 当对话框打开时，重置内容为初始内容；最后一行不是空行时，在文末加一个空行
+        this.primaryDate = this.currentDateString || toDateString(new Date())
+        const minDate = this.minSecondaryDate
+        const drafts = {}
+        // 当天内容为初始内容；最后一行不是空行时，在文末加一个空行
         const initial = this.initialContent || ''
-        this.content = initial === '' || initial.endsWith('\n') ? initial : initial + '\n'
+        drafts[this.primaryDate] = initial === '' || initial.endsWith('\n') ? initial : initial + '\n'
+        // 后续日期已填的作业一并载入草稿，默认停在最后一个有内容的那天
+        let lastFilled = ''
+        for (const day of this.futureDays || []) {
+          if (day.dateString < minDate) continue
+          const content = day.homework?.[this.storageKey]?.content
+          if (!content) continue
+          drafts[day.dateString] = content
+          lastFilled = day.dateString
+        }
+        this.secondaryDate = lastFilled || minDate
+        if (drafts[this.secondaryDate] == null) drafts[this.secondaryDate] = ''
+        this.drafts = drafts
+        this.initialDrafts = { ...drafts }
+        this.focusedSide = 'primary'
         // 加载模板数据
         try {
           this.templateData = await dataProvider.loadData('classworks-config-homework-template')
@@ -302,24 +423,72 @@ export default {
           this.templateData = null
         }
         this.$nextTick(() => {
-          if (this.$refs.inputRef) {
-            this.$refs.inputRef.focus()
-            this.updateCurrentLine()
-          }
+          this.focusActiveArea()
+          this.updateCurrentLine()
         })
       }
     },
   },
   methods: {
-    handleClose() {
-      const trimmedContent = this.content.trim()
-      if (trimmedContent !== this.initialContent.trim()) {
-        this.$emit('save', trimmedContent)
+    dayName(dateString) {
+      return formatDayName(dateString)
+    },
+    setDraft(dateString, value) {
+      this.drafts[dateString] = value
+    },
+    // 失焦不清空，最后点过的编辑框继续接收粘贴、模板和快捷键盘
+    onSideFocused(side, focused) {
+      if (focused) this.focusedSide = side
+    },
+    canStepSecondary(offset) {
+      return shiftDateString(this.secondaryDate, offset) >= this.minSecondaryDate
+    },
+    stepSecondary(offset) {
+      if (!this.canStepSecondary(offset)) return
+      this.selectSecondaryDate(shiftDateString(this.secondaryDate, offset))
+    },
+    selectSecondaryDate(value) {
+      const next = value instanceof Date ? toDateString(value) : value
+      if (!next || next < this.minSecondaryDate) return
+      this.secondaryDate = next
+      // 新日期还没有草稿，先占位，免得输入内容被丢弃
+      if (this.drafts[next] == null) this.drafts[next] = ''
+      this.$nextTick(() => {
+        this.focusedSide = 'secondary'
+        this.focusActiveArea()
+        this.updateCurrentLine()
+      })
+    },
+    activeRef() {
+      return this.focusedSide === 'primary' ? this.$refs.primaryRef : this.$refs.secondaryRef
+    },
+    activeTextarea() {
+      const ref = this.activeRef()
+      return ref ? ref.$el.querySelector('textarea') : null
+    },
+    focusActiveArea() {
+      const ref = this.activeRef()
+      if (ref && ref.focus) ref.focus()
+    },
+    // 收集所有改动过的日期
+    collectChangedEntries() {
+      const entries = []
+      for (const dateString of Object.keys(this.drafts)) {
+        const content = (this.drafts[dateString] || '').trim()
+        if (content !== (this.initialDrafts[dateString] || '').trim()) {
+          entries.push({ dateString, content })
+        }
       }
+      return entries
+    },
+    handleClose() {
+      const entries = this.collectChangedEntries()
+      if (entries.length) this.$emit('save', entries)
       this.dialogVisible = false
     },
     updateCurrentLine() {
-      const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+      const textarea = this.activeTextarea()
+      if (!textarea) return
       const cursorPosition = textarea.selectionStart
       const content = this.content
 
@@ -368,7 +537,8 @@ export default {
         this.content = (hasContent ? this.content.trim() + '\n' : '') + book
       }
       this.$nextTick(() => {
-        const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+        const textarea = this.activeTextarea()
+        if (!textarea) return
         textarea.focus()
 
         if (!this.isBookSelected(book)) {
@@ -414,7 +584,8 @@ export default {
           this.content.slice(end)
       }
       this.$nextTick(() => {
-        const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+        const textarea = this.activeTextarea()
+        if (!textarea) return
         textarea.focus()
 
         // 将光标移动到当前行末尾
@@ -432,7 +603,8 @@ export default {
       })
     },
     insertTemplate(text) {
-      const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+      const textarea = this.activeTextarea()
+      if (!textarea) return
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
 
@@ -452,7 +624,8 @@ export default {
     insertAtCursor(text) {
       if (!text) return
 
-      const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+      const textarea = this.activeTextarea()
+      if (!textarea) return
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
 
@@ -466,7 +639,8 @@ export default {
       })
     },
     deleteLastChar() {
-      const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+      const textarea = this.activeTextarea()
+      if (!textarea) return
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
 
@@ -495,7 +669,8 @@ export default {
     async buildContentWithPaste() {
       const text = await navigator.clipboard.readText()
       if (text == null || text === '') return null
-      const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+      const textarea = this.activeTextarea()
+      if (!textarea) return null
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
       return {
@@ -510,7 +685,8 @@ export default {
         if (!result) return
         this.content = result.content
         this.$nextTick(() => {
-          const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+          const textarea = this.activeTextarea()
+          if (!textarea) return
           textarea.focus()
           textarea.setSelectionRange(result.cursorPosition, result.cursorPosition)
           this.updateCurrentLine()
@@ -519,13 +695,13 @@ export default {
         console.error('Failed to read clipboard:', error)
       }
     },
-    // 从剪贴板粘贴并直接保存关闭，插入逻辑与粘贴一致
+    // 从剪贴板粘贴并直接保存关闭；只保存当前聚焦的那个编辑框
     async pasteAndComplete() {
       try {
         const result = await this.buildContentWithPaste()
         if (!result) return
         this.content = result.content
-        this.$emit('save', this.content.trim())
+        this.$emit('save', [{ dateString: this.activeDate, content: this.content.trim() }])
         this.dialogVisible = false
       } catch (error) {
         console.error('Failed to read clipboard:', error)
@@ -536,6 +712,70 @@ export default {
 </script>
 
 <style scoped>
+/* 卡片整体限高，超出时由中间的编辑区滚动，粘贴与模板始终留在视野内 */
+.hw-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 92vh;
+}
+
+/* 左边编辑区滚动，右边快捷键盘原地不动 */
+.editor-row {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dialog-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.quick-tools {
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.tool-bar {
+  flex: 0 0 auto;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+/* 粘贴按钮按整张卡片居中，不跟着上面的两栏走 */
+.paste-bar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* 日期小标题：后一个编辑框右侧放切换日期的按钮 */
+.date-caption {
+  display: flex;
+  align-items: center;
+  font-size: 0.8rem;
+  opacity: 0.6;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+/* 编辑框内部不出滚动条，滚动统一交给外面的编辑区 */
+.hw-area {
+  --v-textarea-scroll-bar-width: 0;
+}
+
+.hw-area :deep(textarea) {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.hw-area :deep(textarea::-webkit-scrollbar) {
+  display: none;
+}
+
 .template-buttons {
   display: flex;
   flex-direction: column;

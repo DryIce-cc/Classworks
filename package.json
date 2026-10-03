@@ -1,34 +1,14 @@
 {
-  "name": "classworks-monorepo",
+  "name": "justclassworks-monorepo",
   "private": true,
   "version": "0.0.0",
-  "description": "Classworks monorepo — 作业板 (web), KV backend (server), and admin (dashboard).",
+  "description": "JustClassworks monorepo — 精简版作业板 (web only).",
   "type": "module",
   "scripts": {
-    "dev": "pnpm --parallel --filter \"./apps/*\" run dev",
+    "dev": "pnpm --filter @classworks/web run dev",
     "dev:web": "pnpm --filter @classworks/web run dev",
-    "dev:server": "pnpm --filter @classworks/server run dev",
-    "dev:dashboard": "pnpm --filter @classworks/dashboard run dev",
-    "build": "pnpm --parallel --filter \"./apps/*\" run build",
     "build:web": "pnpm --filter @classworks/web run build",
-    "build:server": "pnpm --filter @classworks/server run build",
-    "build:dashboard": "pnpm --filter @classworks/dashboard run build",
-    "preview": "pnpm --parallel --filter \"./apps/*\" run preview",
-    "lint": "eslint . --fix",
-    "lint:check": "eslint .",
-    "format": "prettier --write \"**/*.{js,mjs,jsx,vue,json,css,scss,md}\"",
-    "format:check": "prettier --check \"**/*.{js,mjs,jsx,vue,json,css,scss,md}\"",
     "install:all": "pnpm install"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "eslint": "^9.39.1",
-    "eslint-config-prettier": "^10.0.1",
-    "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-n": "^17.23.1",
-    "eslint-plugin-promise": "^7.2.1",
-    "eslint-plugin-vue": "^10.6.2",
-    "prettier": "^3.4.2"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {

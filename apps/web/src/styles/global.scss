@@ -1,5 +1,12 @@
 // 全局 UI 美化样式
 
+// 浏览器原生的「盘古之白」：中英文、中文与数字之间自动补空格。
+// 该属性是继承属性，挂在 html 上即可覆盖全站（含 teleport 到 body 的弹窗、菜单）。
+// 不支持 text-autospace 的浏览器会整条忽略，行为与现在一致。
+html {
+  text-autospace: normal;
+}
+
 // 卡片悬浮效果
 .hover-card {
   transition:

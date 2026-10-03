@@ -1,0 +1,1 @@
+import{D as t,B as s,s as e,t as n}from"./vendor-vue-Brav6ntB.js";function i(){const o=e(!1);return t(()=>{window.requestAnimationFrame(()=>{o.value=!0})}),{ssrBootStyles:n(()=>o.value?void 0:{transition:"none !important"}),isBooted:s(o)}}export{i as u};

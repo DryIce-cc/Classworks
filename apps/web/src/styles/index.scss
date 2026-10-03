@@ -285,14 +285,8 @@
 .empty-subjects-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  /* 卡片之间水平间距 */
-  --hw-gap-x: 14px;
-  /* 卡片之间垂直间距 */
-  --hw-gap-y: 16px;
-  /* 卡片区与网页边框的一圈留白 */
-  --hw-page-pad: 16px;
-  gap: var(--hw-gap-y) var(--hw-gap-x);
-  padding: var(--hw-page-pad);
+  gap: 9px 8px;
+  padding: 10px;
 }
 
 .empty-subject-card {

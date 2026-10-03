@@ -1,13 +1,3 @@
 packages:
   - 'apps/*'
   - 'packages/*'
-
-allowBuilds:
-  '@parcel/watcher': false
-  esbuild: false
-  sharp: false
-
-onlyBuiltDependencies:
-  - '@parcel/watcher'
-  - esbuild
-  - sharp
