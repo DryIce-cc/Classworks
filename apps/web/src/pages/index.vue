@@ -11,6 +11,7 @@
         v-if="!isToday"
         prepend-icon="mdi-calendar-today"
         variant="tonal"
+        rounded="pill"
         @click="goToday"
       >
         回到今天
@@ -51,6 +52,7 @@
         :sorted-items="sortedItems"
         :unused-subjects="unusedSubjects"
         :content-style="state.contentStyle"
+        :paused="state.dialogVisible"
         @open-dialog="openDialog"
       />
     </v-container>
@@ -58,20 +60,10 @@
 
   <homework-edit-dialog
     v-model="state.dialogVisible"
-    :initial-content="state.textarea"
-    :title="state.dialogTitle"
-    :subject-key="currentEditSubject"
-    :current-date-string="state.dateString"
-    :future-days="state.futureData"
-    :allow-future="state.isToday"
+    :title="currentEditSubject"
+    :initial-date="state.dateString"
     @save="handleHomeworkSave"
   />
-
-  <v-snackbar v-model="state.snackbar" :timeout="2000">
-    {{ state.snackbarText }}
-  </v-snackbar>
-
-  <br /><br /><br />
 </template>
 
 <script>
@@ -88,11 +80,8 @@ import dataProvider from '@/utils/dataProvider'
 import { formatDayName } from '@/utils/date'
 import { getSetting, watchSettings, setSetting } from '@/utils/settings'
 
-// 「其他」不是科目，但和其他科目一样按 key、按天存一份正文，标题固定为「其他」。
-// 正文内部用空行分段、用「# 标题」分段，详见 HomeworkGrid 的解析。
-const EXTRA_NAME = '其他'
-// 不在科目列表里的科目统一排在这个位置：列表科目之后、「其他」之前
-const UNKNOWN_ORDER = 9998
+// 不在科目列表里的科目统一排在这个位置，即所有列表科目之后
+const LAST_ORDER = 9998
 
 export default {
   name: 'Classworks 作业板',
@@ -111,27 +100,22 @@ export default {
       { name: '政治', order: 6 },
       { name: '历史', order: 7 },
       { name: '地理', order: 8 },
+      { name: '其他', order: 9 },
     ]
     return {
       currentEditSubject: null,
       state: {
         boardData: { homework: {} },
         dialogVisible: false,
-        dialogTitle: '',
-        textarea: '',
         dateString: '',
-        snackbar: false,
-        snackbarText: '',
         fontSize: getSetting('font.size'),
         contentStyle: { 'font-size': `${getSetting('font.size')}px` },
-        selectedDate: new Date().toISOString().split('T')[0].replace(/-/g, ''),
         selectedDateObj: new Date(),
-        isToday: true,
         availableSubjects: defaultSubjects,
-        // 后续日期的作业（仅当日视图加载），按日期升序
-        futureData: [],
+        // 展示板所看的这一天以外的每一天（后续日期预加载 + 面板里翻到过去的日子），
+        // 按日期升序
+        otherDays: [],
       },
-      dataReady: false,
     }
   },
 
@@ -147,46 +131,24 @@ export default {
     sortedItems() {
       const items = []
       for (const subject of this.state.availableSubjects) {
-        const subjectKey = subject.name
-        const segments = this.buildSegments(subjectKey)
+        const segments = this.buildSegments(subject.name)
         if (segments.length) {
           items.push({
-            key: subjectKey,
-            editKey: subjectKey,
-            name: subjectKey,
-            type: 'homework',
+            key: subject.name,
+            name: subject.name,
             order: subject.order,
             segments,
           })
         }
       }
-      // 存档里有、科目列表里没有的科目也要显示，排在列表科目之后、「其他」之前
+      // 存档里有、科目列表里没有的科目也要显示，排在列表科目之后
       const known = new Set(this.state.availableSubjects.map((s) => s.name))
       for (const name of this.storedSubjectNames()) {
-        if (known.has(name) || name === EXTRA_NAME) continue
+        if (known.has(name)) continue
         const segments = this.buildSegments(name)
         if (segments.length) {
-          items.push({
-            key: name,
-            editKey: name,
-            name,
-            type: 'homework',
-            order: UNKNOWN_ORDER,
-            segments,
-          })
+          items.push({ key: name, name, order: LAST_ORDER, segments })
         }
-      }
-      // 「其他」固定排在所有科目之下
-      const extraSegments = this.buildSegments(EXTRA_NAME)
-      if (extraSegments.length) {
-        items.push({
-          key: EXTRA_NAME,
-          editKey: EXTRA_NAME,
-          name: EXTRA_NAME,
-          type: 'homework',
-          order: 9999,
-          segments: extraSegments,
-        })
       }
       items.sort((a, b) => a.order - b.order)
       return items
@@ -197,6 +159,11 @@ export default {
       return this.state.availableSubjects
         .filter((subject) => !used.has(subject.name))
         .sort((a, b) => a.order - b.order)
+    },
+    // 展示板只呈现「所看的这一天 + 更晚的日子」。
+    // 更早的日子只可能是编辑面板里翻回去改的：存了档，但不该在这块板上冒出来。
+    laterDays() {
+      return this.state.otherDays.filter((day) => day.dateString > this.state.dateString)
     },
     isToday() {
       const now = new Date()
@@ -210,7 +177,6 @@ export default {
   async mounted() {
     try {
       await this.initializeData()
-      this.dataReady = true
       this.unwatchSettings = watchSettings(() => {
         this.state.fontSize = getSetting('font.size')
         this.state.contentStyle = { 'font-size': `${this.state.fontSize}px` }
@@ -267,9 +233,7 @@ export default {
         if (isNaN(currentDate.getTime())) currentDate = today
       }
       this.state.dateString = this.formatDate(currentDate)
-      this.state.selectedDate = this.state.dateString
       this.state.selectedDateObj = currentDate
-      this.state.isToday = this.formatDate(currentDate) === this.formatDate(today)
       await Promise.all([this.loadDayData(), this.loadSubjects()])
     },
 
@@ -285,20 +249,20 @@ export default {
           this.state.boardData = { homework: {} }
         }
       }
-      await this.loadFutureData()
+      await this.loadOtherDays()
     },
 
     // 仅当日视图把后面各天的作业一并读出来；查看历史/未来日期时不启用
-    async loadFutureData() {
+    async loadOtherDays() {
       const todayStr = this.formatDate(this.getToday())
       if (this.state.dateString !== todayStr) {
-        this.state.futureData = []
+        this.state.otherDays = []
         return
       }
       try {
         const res = await dataProvider.loadKeys({ limit: 1000 })
         if (!res || res.success === false || !Array.isArray(res.keys)) {
-          this.state.futureData = []
+          this.state.otherDays = []
           return
         }
         const dates = res.keys
@@ -311,23 +275,38 @@ export default {
           if (!data || data.success === false) continue
           days.push({ dateString: ds, homework: data.homework || {} })
         }
-        this.state.futureData = days
+        this.state.otherDays = days
       } catch (error) {
         console.warn('加载后续日期作业失败:', error)
-        this.state.futureData = []
+        this.state.otherDays = []
       }
     },
 
-    // 取某一天的作业表；未来日期没有存档时就地新建一份
-    ensureDayHomework(dateString) {
-      if (!dateString || dateString === this.state.dateString) return this.state.boardData.homework
-      let day = this.state.futureData.find((d) => d.dateString === dateString)
+    // 取某一天的作业表；展示板没读进内存的那天（多半是过去的日子）先从存档读出来，
+    // 直接往空对象上写会把那天其他科目的作业抹掉
+    async ensureDayHomework(dateString) {
+      if (!dateString) return null
+      if (dateString === this.state.dateString) return this.state.boardData.homework
+      let day = this.state.otherDays.find((d) => d.dateString === dateString)
       if (!day) {
         day = { dateString, homework: {}, pendingCreate: true }
-        this.state.futureData.push(day)
-        this.state.futureData.sort((a, b) => a.dateString.localeCompare(b.dateString))
+        this.state.otherDays.push(day)
+        this.state.otherDays.sort((a, b) => a.dateString.localeCompare(b.dateString))
+        await this.loadOtherDay(day)
       }
       return day.homework
+    },
+
+    // 把某一天的存档读进缓存；这天本来就没有作业就留空，等于 pendingCreate
+    async loadOtherDay(day) {
+      try {
+        const data = await dataProvider.loadData('classworks-data-' + day.dateString)
+        if (!data || data.success === false || Array.isArray(data)) return
+        const homework = data.homework || data
+        if (homework && typeof homework === 'object') day.homework = homework
+      } catch (error) {
+        console.warn('读取作业失败:', error)
+      }
     },
 
     // 存档里出现过、且确实有内容的科目（含后续日期）
@@ -339,18 +318,19 @@ export default {
         }
       }
       collect(this.state.boardData.homework)
-      for (const day of this.state.futureData) collect(day.homework)
+      for (const day of this.laterDays) collect(day.homework)
       return names
     },
 
     // 同一科目的作业分块：当日在前，后续日期按日期升序，分隔线由渲染层处理
+    // 正文内部用空行分段、用「# 标题」分段，详见 HomeworkGrid 的解析
     buildSegments(subjectName) {
       const segments = []
       const todayData = this.state.boardData.homework[subjectName]
       if (todayData && todayData.content) {
         segments.push({ label: null, content: todayData.content })
       }
-      for (const day of this.state.futureData) {
+      for (const day of this.laterDays) {
         const data = day.homework?.[subjectName]
         if (data && data.content) {
           segments.push({ label: this.dayName(day.dateString), content: data.content })
@@ -367,7 +347,7 @@ export default {
       if (dateString === this.state.dateString) {
         payload = this.state.boardData
       } else {
-        day = this.state.futureData.find((d) => d.dateString === dateString)
+        day = this.state.otherDays.find((d) => d.dateString === dateString)
         // 新建的日期若最终没有任何内容就不落盘
         if (!day || (day.pendingCreate && !Object.keys(day.homework).length)) return
         payload = { homework: day.homework }
@@ -389,34 +369,16 @@ export default {
       try {
         const subjectsResponse = await dataProvider.loadData('classworks-config-subject')
         if (subjectsResponse && Array.isArray(subjectsResponse)) {
-          // 其他/其他不是科目，过滤掉（作为可无限添加的附加卡片）
-          this.state.availableSubjects = subjectsResponse.filter(
-            (s) => s.name !== '其他' && s.name !== '其他',
-          )
+          this.state.availableSubjects = subjectsResponse
         }
       } catch (error) {
         console.warn('加载科目配置失败:', error)
       }
     },
 
-    // 编辑入口。key 形如「数学」或「其他」，也可带 @日期 表示直接编辑那一天的内容
-    async openDialog(editKey) {
-      const at = editKey.lastIndexOf('@')
-      const key = at === -1 ? editKey : editKey.slice(0, at)
-      const dateString = at === -1 ? this.state.dateString : editKey.slice(at + 1)
-
+    // 编辑入口，key 就是科目名；对话框初始停在展示板正在看的那天，可自行前后翻日期
+    openDialog(key) {
       this.currentEditSubject = key
-      const homework =
-        dateString === this.state.dateString
-          ? this.state.boardData.homework
-          : this.state.futureData.find((d) => d.dateString === dateString)?.homework
-      // 当天的条目先占位，保证 key 在存档里存在
-      if (dateString === this.state.dateString && !homework[key]) {
-        homework[key] = { content: '' }
-      }
-      this.state.dialogTitle =
-        this.state.availableSubjects.find((s) => s.name === key)?.name || key
-      this.state.textarea = homework?.[key]?.content || ''
       this.state.dialogVisible = true
     },
 
@@ -426,13 +388,9 @@ export default {
       if (!key || !Array.isArray(entries)) return
       const touched = []
       for (const { dateString, content } of entries) {
-        const homework = this.ensureDayHomework(dateString)
-        // 「其他」内容为空则删掉这条，不留空壳
-        if (!content && key === EXTRA_NAME) {
-          delete homework[key]
-        } else {
-          homework[key] = { ...homework[key], content }
-        }
+        const homework = await this.ensureDayHomework(dateString)
+        if (!homework) continue
+        homework[key] = { ...homework[key], content }
         touched.push(dateString)
       }
       for (const dateString of touched) {
@@ -440,9 +398,6 @@ export default {
       }
     },
 
-    showMessage(title, content = '', type = 'success') {
-      this.$message[type](title, content)
-    },
     showError(title, content = '') {
       this.$message.error(title, content)
     },
@@ -462,9 +417,7 @@ export default {
         const dateStr = this.formatDate(selectedDate)
         if (dateStr === this.state.dateString) return
         this.state.dateString = dateStr
-        this.state.selectedDate = dateStr
         this.state.selectedDateObj = selectedDate
-        this.state.isToday = dateStr === this.formatDate(this.getToday())
         await Promise.all([this.loadDayData(), this.loadSubjects()])
       } catch (error) {
         console.error('日期处理错误:', error)

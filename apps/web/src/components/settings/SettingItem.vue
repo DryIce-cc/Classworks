@@ -173,16 +173,7 @@ export default {
       type: String,
       default: null,
     },
-
-    /**
-     * 可选的自定义描述，如果不提供则不显示描述
-     */
-    description: {
-      type: String,
-      default: null,
-    },
   },
-
   data() {
     return {
       localValue: null,
@@ -195,24 +186,6 @@ export default {
       stepValue: 1,
       showSnackbar: false,
       snackbarText: '',
-      fontFamilies: [
-        { title: 'Arial', value: 'Arial, sans-serif' },
-        { title: 'Calibri', value: 'Calibri, sans-serif' },
-        { title: 'Cambria', value: 'Cambria, serif' },
-        { title: 'Consolas', value: 'Consolas, monospace' },
-        { title: 'Courier New', value: 'Courier New, monospace' },
-        { title: 'Georgia', value: 'Georgia, serif' },
-        { title: 'Helvetica', value: 'Helvetica, sans-serif' },
-        { title: 'Segoe UI', value: 'Segoe UI, sans-serif' },
-        { title: 'Times New Roman', value: 'Times New Roman, serif' },
-        { title: 'Trebuchet MS', value: 'Trebuchet MS, sans-serif' },
-        { title: 'Verdana', value: 'Verdana, sans-serif' },
-        { title: 'Monospace', value: 'monospace' },
-        { title: 'Sans-serif', value: 'sans-serif' },
-        { title: 'Serif', value: 'serif' },
-      ],
-      // 设置项的显示名称映射
-      displayValueMappings: {},
       // 默认图标映射，按设置类型
       defaultIcons: {
         boolean: 'mdi-toggle-switch-outline',
@@ -237,24 +210,6 @@ export default {
       // 最后使用键名的最后一部分
       const parts = this.settingKey.split('.')
       return parts[parts.length - 1]
-    },
-
-    displayDescription() {
-      // 优先使用自定义描述
-      if (this.description) {
-        return this.description
-      }
-
-      // 否则使用设置键名
-      return this.settingKey
-    },
-
-    // 判断是否为字体系列设置
-    isFontFamily() {
-      return (
-        this.settingKey.toLowerCase().includes('fontfamily') ||
-        this.settingKey.toLowerCase().includes('font.family')
-      )
     },
 
     // 判断当前值是否为默认值
@@ -306,43 +261,20 @@ export default {
       // 加载设置值
       this.localValue = getSetting(this.settingKey)
 
-      // 处理选项（对于字符串类型的设置）
-      if (this.type === 'string') {
-        // 检查是否有字体设置
-        if (this.isFontFamily) {
-          this.selectOptions = this.fontFamilies
-          this.hasOptions = true
-        }
-        // 检查是否有显示值映射
-        else if (this.settingKey in this.displayValueMappings) {
-          const mapping = this.displayValueMappings[this.settingKey]
-          this.selectOptions = Object.entries(mapping).map(([value, title]) => ({
-            title,
-            value,
-          }))
-          this.hasOptions = true
-        }
-        // 检查是否有验证函数中的选项
-        else if (this.definition.validate) {
-          const validateStr = this.definition.validate.toString()
-          const match = validateStr.match(/\[(.*?)\]/)
+      // 处理选项：字符串类型的枚举直接写在 validate 的数组里
+      if (this.type === 'string' && this.definition.validate) {
+        const validateStr = this.definition.validate.toString()
+        const match = validateStr.match(/\[(.*?)\]/)
 
-          if (match) {
-            const optionsStr = match[1]
-            const options = optionsStr.split(',').map((opt) => {
-              const cleaned = opt.trim().replace(/['"]/g, '')
-              // 检查是否有显示值映射
-              const displayValue = this.getDisplayValue(cleaned)
-              return {
-                title: displayValue || cleaned,
-                value: cleaned,
-              }
-            })
+        if (match) {
+          const options = match[1].split(',').map((opt) => {
+            const cleaned = opt.trim().replace(/['"]/g, '')
+            return { title: cleaned, value: cleaned }
+          })
 
-            if (options.length > 0) {
-              this.selectOptions = options
-              this.hasOptions = true
-            }
+          if (options.length > 0) {
+            this.selectOptions = options
+            this.hasOptions = true
           }
         }
       }
@@ -375,15 +307,6 @@ export default {
           this.stepValue = 1
         }
       }
-    },
-
-    // 获取设置值的显示名称
-    getDisplayValue(value) {
-      if (this.settingKey in this.displayValueMappings) {
-        const mapping = this.displayValueMappings[this.settingKey]
-        return mapping[value] || value
-      }
-      return value
     },
 
     updateSetting(value) {

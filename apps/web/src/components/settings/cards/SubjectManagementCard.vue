@@ -1,9 +1,5 @@
 <template>
   <settings-card :loading="loading" border icon="mdi-book-multiple" title="科目管理">
-    <v-alert v-if="error" class="mb-4" closable type="error" variant="tonal">
-      {{ error }}
-    </v-alert>
-
     <div class="d-flex justify-space-between align-center mb-6">
       <div>
         <v-btn
@@ -129,7 +125,6 @@ export default {
   data() {
     return {
       loading: false,
-      error: null,
       subjects: [],
       originalSubjects: null,
       newSubjectName: '',
@@ -146,6 +141,7 @@ export default {
         { name: '政治', order: 6 },
         { name: '历史', order: 7 },
         { name: '地理', order: 8 },
+        { name: '其他', order: 9 },
       ],
     }
   },
@@ -168,22 +164,21 @@ export default {
       this.loading = true
       try {
         const response = await dataProvider.loadData('classworks-config-subject')
-        if (response) {
-          // 数据存在且加载成功
-          this.subjects = response
-            .map((subject, index) => ({
-              name: subject.name,
-              order: subject.order ?? index,
-            }))
-            .sort((a, b) => a.order - b.order)
+        // 读不到 key 时 dataProvider 会返回 { success: false }，必须判 success 而不是判真值
+        if (response.success === false) {
+          this.subjects = JSON.parse(JSON.stringify(this.defaultSubjects))
           this.originalSubjects = JSON.parse(JSON.stringify(this.subjects))
-          this.showMessage('配置已加载', 'success')
-        } else {
-          // 数据不存在，使用空数组
-          this.subjects = []
-          this.originalSubjects = []
           this.showMessage('使用默认配置', 'info')
+          return
         }
+        this.subjects = response
+          .map((subject, index) => ({
+            name: subject.name,
+            order: subject.order ?? index,
+          }))
+          .sort((a, b) => a.order - b.order)
+        this.originalSubjects = JSON.parse(JSON.stringify(this.subjects))
+        this.showMessage('配置已加载', 'success')
       } catch (error) {
         console.error('Failed to load config:', error)
         this.showMessage('加载失败，可继续编辑当前配置', 'warning')
@@ -195,12 +190,11 @@ export default {
       this.loading = true
       try {
         const response = await dataProvider.saveData('classworks-config-subject', this.subjects)
-        if (response) {
-          this.originalSubjects = JSON.parse(JSON.stringify(this.subjects))
-          this.showMessage('配置已保存', 'success')
-        } else {
-          throw new Error(response || '保存失败')
+        if (response.success === false) {
+          throw new Error(response.error?.message || '保存失败')
         }
+        this.originalSubjects = JSON.parse(JSON.stringify(this.subjects))
+        this.showMessage('配置已保存', 'success')
       } catch (error) {
         console.error('Failed to save config:', error)
         this.showMessage(`保存失败: ${error.message}，请稍后重试`, 'error')

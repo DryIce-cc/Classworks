@@ -7,7 +7,6 @@ import Vue from '@vitejs/plugin-vue'
 import VueRouter from 'unplugin-vue-router/vite'
 import Vuetify, { transformAssetUrls } from 'vite-plugin-vuetify'
 import { VitePWA } from 'vite-plugin-pwa'
-//import { TDesignResolver } from 'unplugin-vue-components/resolvers'
 
 // Utilities
 import { defineConfig } from 'vite'
@@ -40,7 +39,6 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest,txt,json,woff2,ttf}'],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io\//],
         runtimeCaching: [
           {
             urlPattern: ({ url, sameOrigin }) => {
@@ -99,7 +97,6 @@ export default defineConfig({
             },
           },
         ],
-        additionalManifestEntries: [],
         clientsClaim: true,
         skipWaiting: true,
         importScripts: ['sw-cache-manager.js'],
@@ -186,11 +183,8 @@ export default defineConfig({
       },
     }),
     Components({
-      // 排除已在 index.vue 中通过 defineAsyncComponent 手动懒加载的组件
-      // 避免 unplugin-vue-components 生成冲突的静态 import
       directoryAsNamespace: false,
       globs: ['src/components/**/[A-Z]*.vue'],
-      exclude: [/pages\/index\.vue$/],
     }),
     Fonts({
       google: {
@@ -204,18 +198,14 @@ export default defineConfig({
     }),
     AutoImport({
       imports: ['vue', 'vue-router'],
-      eslintrc: {
-        enabled: true,
-      },
       vueTemplate: true,
     }),
   ],
-  define: { 'process.env': {} },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
-    extensions: ['.js', '.json', '.jsx', '.mjs', '.ts', '.tsx', '.vue'],
+    extensions: ['.js', '.mjs', '.json', '.vue'],
   },
   build: {
     // ===== Chunk 分割优化 =====
@@ -224,7 +214,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           // 核心框架（极少变动，长缓存）
-          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-vue': ['vue', 'vue-router'],
           // UI 框架
           'vendor-vuetify': ['vuetify'],
         },

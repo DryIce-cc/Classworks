@@ -47,7 +47,6 @@ export default {
   methods: {
     resetAll() {
       resetAllSettings()
-      this.$emit('update')
     },
   },
 }

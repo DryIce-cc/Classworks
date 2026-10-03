@@ -1,10 +1,10 @@
 /**
  * main.js
  *
- * 精简启动流水线：快速挂载 Vue app，重型依赖（Sentry/Clarity）异步加载
+ * 应用入口：注册 Vuetify / Router / 全局消息，挂载后交给 App.vue
  */
 
-// 核心插件（Vuetify / Router / Pinia）
+// 核心插件（Vuetify / Router）
 import { registerPlugins } from '@/plugins'
 
 // Components
@@ -21,7 +21,7 @@ const app = createApp(App)
 registerPlugins(app)
 app.use(messageService)
 
+// 全局消息组件在 App.vue 里用到；这里注册一次，别处直接写 <global-message />
 app.component('GlobalMessage', GlobalMessage)
 
-// 挂载 Vue app（首要目标：尽快渲染首屏）
 app.mount('#app')

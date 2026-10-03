@@ -2,40 +2,33 @@
 $emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
 $emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
 $standard-easing: cubic-bezier(0.2, 0, 0, 1);
-$standard-decelerate: cubic-bezier(0, 0, 0, 1);
 $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
 
-// 网格项目的进入和离开动画
+// 卡片容器基础过渡（分列重排时跟着动）
 .grid-item {
   transition:
-    transform 400ms $emphasized-decelerate,
-    opacity 200ms $standard-easing;
+    transform 180ms $standard-easing,
+    opacity 180ms $standard-easing;
   will-change: transform, opacity;
   backface-visibility: hidden;
+}
 
-  &.v-enter-active {
-    transition:
-      transform 400ms $emphasized-decelerate,
-      opacity 250ms $standard-easing;
-  }
+// 作业卡片挂载/卸载（TransitionGroup name="grid"）：轻快短促，只做一点位移
+.grid-enter-active,
+.grid-leave-active {
+  transition:
+    opacity 180ms $standard-easing,
+    transform 180ms $standard-easing;
+}
 
-  &.v-move {
-    transition: transform 400ms $emphasized-decelerate;
-    z-index: 1;
-  }
+.grid-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
 
-  &.v-leave-active {
-    position: absolute !important;
-    transition:
-      transform 300ms $emphasized-accelerate,
-      opacity 200ms $standard-accelerate;
-  }
-
-  &.v-enter-from,
-  &.v-leave-to {
-    opacity: 0;
-    transform: scale(0.95);
-  }
+.grid-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 
 // 空科目卡片动画
@@ -48,41 +41,27 @@ $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
   }
 }
 
-// 列表项目动画
-.v-list-enter-active {
-  transition: all 400ms $emphasized-decelerate;
-}
-
+// 待添加科目列表动画（TransitionGroup name="v-list"）
+.v-list-enter-active,
 .v-list-leave-active {
-  transition: all 300ms $emphasized-accelerate;
+  transition:
+    opacity 180ms $standard-easing,
+    transform 180ms $standard-easing;
 }
 
-.v-list-enter-from,
+.v-list-enter-from {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
 .v-list-leave-to {
   opacity: 0;
-  transform: translateX(-24px);
+  transform: translateX(8px);
 }
 
-// 出勤数据变化动画
-.attendance-area {
-  h2,
-  h3 {
-    transition: all 300ms $standard-easing;
-  }
-}
-
-// 卡片展开收起动画
+// 卡片按压效果与触摸体验
 .v-card {
   transition: all 400ms $emphasized-decelerate;
-
-  &:active {
-    transform: scale(0.98);
-    transition-duration: 100ms;
-  }
-}
-
-// 优化卡片触摸体验
-.v-card {
   touch-action: manipulation;
 
   &:active {
@@ -92,28 +71,19 @@ $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
 
   @media (pointer: coarse) {
     &::before {
-      // 增加触摸反馈区域
+      // 扩大触摸反馈区域
       margin: -8px;
     }
   }
 }
 
-// 修改对话框过渡动画 - 移除点击波纹效果
+// 对话框：去掉点击波纹，并关掉卡片的按压效果
 .v-dialog {
-  &::before {
-    display: none !important;
-  }
-}
-
-// 对话框过渡动画
-.v-dialog {
-  // 禁用原生点击波纹效果
   &::before,
   &::after {
     display: none !important;
   }
 
-  // 禁用卡片点击效果
   .v-card {
     transition: none;
 
@@ -123,7 +93,6 @@ $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
   }
 }
 
-// 保持对话框本身的过渡动画
 .v-dialog-transition-enter-active {
   transition:
     transform 400ms $emphasized-decelerate,
@@ -156,7 +125,7 @@ $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
     margin: 4px;
 
     &::before {
-      // 增加触摸反馈区域
+      // 扩大触摸反馈区域
       margin: -8px;
     }
   }
@@ -169,79 +138,4 @@ $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
   -ms-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
-}
-
-// 动画过渡效果
-
-// 网格项目过渡
-.grid-enter-active,
-.grid-leave-active {
-  transition: all 0.5s ease;
-}
-
-.grid-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
-.grid-leave-to {
-  opacity: 0;
-  transform: translateY(-20px);
-}
-
-// 列表项目过渡
-.v-list-enter-active,
-.v-list-leave-active {
-  transition: all 0.3s ease;
-}
-
-.v-list-enter-from {
-  opacity: 0;
-  transform: translateX(-20px);
-}
-
-.v-list-leave-to {
-  opacity: 0;
-  transform: translateX(20px);
-}
-
-// 页面过渡
-.page-enter-active,
-.page-leave-active {
-  transition:
-    opacity 0.3s,
-    transform 0.3s;
-}
-
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
-.page-leave-to {
-  opacity: 0;
-  transform: translateY(-20px);
-}
-
-// 淡入淡出
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-// 缩放过渡
-.scale-enter-active,
-.scale-leave-active {
-  transition: all 0.3s;
-}
-
-.scale-enter-from,
-.scale-leave-to {
-  opacity: 0;
-  transform: scale(0.9);
 }

@@ -1,18 +1,4 @@
-.glow-effect {
-  transition:
-    box-shadow 0.3s ease-in-out,
-    transform 0.3s ease-in-out;
-
-  &:hover {
-    box-shadow: 0 0 15px rgba(var(--v-theme-primary), 0.5);
-    transform: translateY(-2px);
-  }
-}
-
-.glow-text {
-  text-shadow: 0 0 5px rgba(var(--v-theme-primary), 0.5);
-}
-
+// 作业卡片的发光效果（配合 index.vue 上的 .bloom-container）
 .bloom-container {
   .v-card {
     transition: box-shadow 0.3s ease;

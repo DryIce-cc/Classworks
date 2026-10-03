@@ -1,129 +1,36 @@
-class LogDB {
-  constructor() {
-    this.logs = []
-  }
+// 全局消息：只做一件事——把提示交给 GlobalMessage 弹 snackbar
 
-  async addLog(message) {
-    this.logs.push(message)
-    // 只保留最近100条消息
-    if (this.logs.length > 100) {
-      this.logs.shift()
-    }
-    return true
-  }
-
-  async getLogs(limit = 20) {
-    return this.logs.slice(-limit).reverse()
-  }
-}
-
-const logDB = new LogDB()
-
-const messages = []
 let snackbarCallback = null
-let logCallback = null
 
-const MessageType = {
+const MESSAGE_TYPE = {
   SUCCESS: 'success',
   ERROR: 'error',
   INFO: 'info',
   WARNING: 'warning',
 }
 
-const defaultOptions = {
-  timeout: 3000,
-  showSnackbar: true,
-  addToLog: true,
-}
-
-async function createMessage(type, title, content = '', options = {}) {
-  const msgOptions = { ...defaultOptions, ...options }
+function createMessage(type, title, content = '', options = {}) {
   const message = {
-    id: Date.now() + Math.random(),
     type,
     title,
-    content: content.substring(0, 500),
-    timestamp: new Date(),
+    content: String(content ?? '').substring(0, 500),
   }
-
-  if (msgOptions.addToLog) {
-    try {
-      await logDB.addLog(message)
-      messages.unshift(message)
-      while (messages.length > 5) {
-        messages.pop()
-      }
-      logCallback?.(messages)
-    } catch (error) {
-      console.error('保存日志失败:', error)
-    }
-  }
-
-  if (msgOptions.showSnackbar) {
-    snackbarCallback?.(message)
-  }
-
+  if (options.showSnackbar !== false) snackbarCallback?.(message)
   return message
-}
-
-function debounce(fn, delay) {
-  let timer = null
-  return function (...args) {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      fn.apply(this, args)
-    }, delay)
-  }
 }
 
 export default {
   install: (app) => {
+    const create = (type) => (title, content, options) =>
+      createMessage(type, title, content, options)
     app.config.globalProperties.$message = {
-      success: (title, content, options) =>
-        createMessage(MessageType.SUCCESS, title, content, options),
-      error: (title, content, options) => createMessage(MessageType.ERROR, title, content, options),
-      info: (title, content, options) => createMessage(MessageType.INFO, title, content, options),
-      warning: (title, content, options) =>
-        createMessage(MessageType.WARNING, title, content, options),
+      success: create(MESSAGE_TYPE.SUCCESS),
+      error: create(MESSAGE_TYPE.ERROR),
+      info: create(MESSAGE_TYPE.INFO),
+      warning: create(MESSAGE_TYPE.WARNING),
     }
   },
   onSnackbar: (callback) => {
     snackbarCallback = callback
   },
-  onLog: (callback) => {
-    logCallback = callback
-  },
-  getMessages: async () => {
-    try {
-      return await logDB.getLogs()
-    } catch (error) {
-      console.error('获取日志失败:', error)
-      return [...messages]
-    }
-  },
-  clearMessages: async () => {
-    try {
-      await logDB.clearLogs()
-      messages.length = 0
-      logCallback?.(messages)
-    } catch (error) {
-      console.error('清除日志失败:', error)
-    }
-  },
-  MessageType,
-  markAsRead: () => {}, // 移除标记已读功能
-  deleteMessage: async (messageId) => {
-    try {
-      await logDB.deleteLog(messageId)
-      const index = messages.findIndex((m) => m.id === messageId)
-      if (index !== -1) {
-        messages.splice(index, 1)
-      }
-      logCallback?.(messages)
-    } catch (error) {
-      console.error('删除消息失败:', error)
-    }
-  },
-  getUnreadCount: () => 0, // 移除未读计数
-  debounce,
 }

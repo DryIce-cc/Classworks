@@ -1,7 +1,5 @@
-// 精简版设置：仅保留字体大小；其余行为均使用默认值（见各组件内硬编码常量）
-// 已移除：服务器/云端、刷新、背景、通知铃声、一言、随机点名、噪音、花名册、消息、
-// 预配链接、关于、时间卡片、开发者开关（一律启用）、一体机模式（一律启用）、
-// 编辑自动保存（一律启用）、保存提示文案、主题（一律深色）、PWA 隐藏卡片
+// 设置项目前只有「字体大小」一项，存 localStorage；改动通过事件广播给各页面
+// 默认科目列表硬编码在 pages/index.vue 与 SubjectManagementCard.vue
 
 const SETTINGS_STORAGE_KEY = 'Classworks_settings'
 const SETTINGS_CHANGED_EVENT = 'classworks:settings:changed'
@@ -11,7 +9,7 @@ const settingsDefinitions = {
   // 字体设置（唯一保留的可配置项）
   'font.size': {
     type: 'number',
-    default: 28,
+    default: 18,
     validate: (value) => value >= 16 && value <= 100,
     description: '字体大小',
     icon: 'mdi-format-size',
@@ -97,10 +95,6 @@ class SettingsManagerClass {
           new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: { key, value } }),
         )
       }
-      const legacyKey = definition.legacyKey
-      if (legacyKey && typeof localStorage !== 'undefined') {
-        localStorage.setItem(legacyKey, value.toString())
-      }
       return true
     } catch (error) {
       console.error(`设置配置项 ${key} 失败:`, error)
@@ -154,15 +148,6 @@ class SettingsManagerClass {
   getSettingDefinition(key) {
     return settingsDefinitions[key] || null
   }
-
-  exportSettingsAsKeyValue() {
-    if (!this.isInitialized) this.init()
-    const exportedSettings = {}
-    for (const key in settingsDefinitions) {
-      exportedSettings[key] = this.getSetting(key)
-    }
-    return exportedSettings
-  }
 }
 
 const SettingsManager = new SettingsManagerClass()
@@ -177,16 +162,13 @@ const resetSetting = (key) => SettingsManager.resetSetting(key)
 const resetAllSettings = () => SettingsManager.resetAllSettings()
 const watchSettings = (callback) => SettingsManager.watchSettings(callback)
 const getSettingDefinition = (key) => SettingsManager.getSettingDefinition(key)
-const exportSettingsAsKeyValue = () => SettingsManager.exportSettingsAsKeyValue()
 
 export {
   settingsDefinitions,
-  SettingsManager,
   getSetting,
   setSetting,
   resetSetting,
   resetAllSettings,
   watchSettings,
   getSettingDefinition,
-  exportSettingsAsKeyValue,
 }

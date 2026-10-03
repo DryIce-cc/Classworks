@@ -1,50 +1,55 @@
-<!-- 作业编辑对话框：上半部分是当天，下半部分是未来某天（可切换日期） -->
+<!-- 作业编辑对话框：一个编辑框，靠日期小标题两侧的按钮切换要编辑哪一天 -->
 <template>
   <v-dialog
     v-model="dialogVisible"
     :fullscreen="false"
-    max-width="900"
-    width="auto"
-    @click:outside="handleClose"
+    width="900"
+    max-width="calc(100vw - 48px)"
+    content-class="homework-dialog-content"
+    persistent
   >
-    <v-card border class="hw-dialog">
+    <v-card border @keydown="handleKeydown">
+      <!-- 顶部倒计条：5s 内一动不动就自动关掉，防的是误触打开 -->
+      <div v-if="countdownActive" class="close-countdown">
+        <div class="close-countdown-bar" :style="closeCountdownStyle" />
+      </div>
+
       <v-card-title class="d-flex align-center">
         {{ title }}
         <v-spacer />
         <v-btn icon="mdi-close" variant="text" @click="handleClose" />
       </v-card-title>
 
-      <!-- 滚动区只放两个编辑框和日期控件，右侧快捷键盘与下方工具栏都不参与滚动 -->
-      <div class="editor-row">
-        <v-card-text class="dialog-body">
-          <div class="date-caption">{{ dayName(primaryDate) }}的作业</div>
-          <v-textarea
-            ref="primaryRef"
-            :model-value="drafts[primaryDate]"
-            auto-grow
-            placeholder="使用换行表示分条"
-            rows="5"
-            :width="'480'"
-            class="hw-area"
-            @update:model-value="setDraft(primaryDate, $event)"
-            @update:focused="onSideFocused('primary', $event)"
-            @click="updateCurrentLine"
-            @keyup="updateCurrentLine"
-          />
-
-          <template v-if="allowFuture">
-            <div class="date-caption mt-3">
-              {{ dayName(secondaryDate) }}的作业
+      <!-- 标题栏已经占了一行，这里把内容顶上来，免得科目名与内容之间空一大块 -->
+      <v-card-text style="padding-top: 4px">
+        <div class="d-flex">
+          <div class="flex-grow-1">
+            <!-- 日期小标题 + 切换日期的按钮；没有下限，一直能往前翻，只在已经离开今天时给「回到今天」 -->
+            <div class="date-caption">
+              {{ dayName }}的作业
               <v-spacer />
+              <v-btn
+                v-if="canGoToday"
+                size="small"
+                class="today-btn"
+                variant="text"
+                rounded="pill"
+                title="回到今天"
+                @mousedown.prevent
+                @click="goToday"
+              >
+                回到今天
+              </v-btn>
               <v-btn
                 icon="mdi-chevron-left"
                 size="small"
                 variant="text"
-                title="查看昨天"
-                :disabled="!canStepSecondary(-1)"
-                @click="stepSecondary(-1)"
+                title="上一天"
+                @mousedown.prevent
+                @click="shiftDate(-1)"
               />
-              <v-menu location="bottom">
+              <!-- close-on-content-click 必须为 false：默认 true 会在选择器里点任何地方都把它自己关掉 -->
+              <v-menu v-model="pickerOpen" :close-on-content-click="false" location="bottom">
                 <template #activator="{ props: activatorProps }">
                   <v-btn
                     v-bind="activatorProps"
@@ -56,219 +61,215 @@
                 </template>
                 <v-card border rounded="md">
                   <v-date-picker
-                    :model-value="secondaryDateObj"
-                    :min="minSecondaryObj"
+                    :model-value="currentDateObj"
                     color="primary"
-                    @update:model-value="selectSecondaryDate"
+                    @update:model-value="selectDate"
                   />
                 </v-card>
               </v-menu>
               <v-btn
-                icon="mdi-chevron-right"
-                size="small"
+                prepend-icon="mdi-chevron-right"
+                rounded="pill"
                 variant="text"
-                title="查看明天"
-                @click="stepSecondary(1)"
-              />
+                size="small"
+                title="下一天"
+                @mousedown.prevent
+                @click="shiftDate(1)"
+              >
+                {{ nextDayName }}
+              </v-btn>
             </div>
+
             <v-textarea
-              ref="secondaryRef"
-              :model-value="drafts[secondaryDate]"
+              ref="inputRef"
+              v-model="content"
               auto-grow
               placeholder="使用换行表示分条"
-              rows="2"
-              :width="'480'"
+              rows="5"
               class="hw-area"
-              @update:model-value="setDraft(secondaryDate, $event)"
-              @update:focused="onSideFocused('secondary', $event)"
               @click="updateCurrentLine"
               @keyup="updateCurrentLine"
             />
-          </template>
-        </v-card-text>
 
-        <!-- Quick Tools Section -->
-        <div v-if="showQuickTools" class="quick-tools ml-4" style="min-width: 180px">
-          <!-- Numeric Keypad -->
-          <div class="numeric-keypad mb-4">
-            <div class="keypad-row">
+            <div class="paste-bar">
               <v-btn
-                v-for="n in 3"
-                :key="n"
-                class="keypad-btn"
                 size="small"
-                variant="tonal"
-                @click="insertAtCursor(String(n))"
+                variant="outlined"
+                prepend-icon="mdi-content-paste"
+                @mousedown.prevent
+                @click="pasteFromClipboard"
               >
-                {{ n }}
-              </v-btn>
-            </div>
-            <div class="keypad-row">
-              <v-btn
-                v-for="n in 3"
-                :key="n"
-                class="keypad-btn"
-                size="small"
-                variant="tonal"
-                @click="insertAtCursor(String(n + 3))"
-              >
-                {{ n + 3 }}
-              </v-btn>
-            </div>
-            <div class="keypad-row">
-              <v-btn
-                v-for="n in 3"
-                :key="n"
-                class="keypad-btn"
-                size="small"
-                variant="tonal"
-                @click="insertAtCursor(String(n + 6))"
-              >
-                {{ n + 6 }}
-              </v-btn>
-            </div>
-            <div class="keypad-row">
-              <v-btn class="keypad-btn" size="small" variant="tonal" @click="insertAtCursor('-')">
-                -
-              </v-btn>
-              <v-btn class="keypad-btn" size="small" variant="tonal" @click="insertAtCursor('0')">
-                0
+                粘贴
               </v-btn>
               <v-btn
-                class="keypad-btn"
-                color="error"
                 size="small"
-                variant="tonal"
-                @click="deleteLastChar"
-              >
-                ←
-              </v-btn>
-            </div>
-            <div class="keypad-row">
-              <v-btn
-                class="keypad-btn space-btn"
-                size="small"
-                variant="tonal"
-                @click="insertAtCursor(' ')"
-              >
-                空格
-              </v-btn>
-              <v-btn
-                class="keypad-btn space-btn"
-                size="small"
-                variant="tonal"
-                @click="insertAtCursor('\n')"
-              >
-                换行
-              </v-btn>
-            </div>
-          </div>
-
-          <div class="d-flex flex-wrap gap-1">
-            <v-btn
-              v-for="text in quickTexts"
-              :key="text"
-              size="small"
-              variant="flat"
-              @click="insertAtCursor(text)"
-            >
-              {{ text }}
-            </v-btn>
-          </div>
-        </div>
-        </div>
-
-      <!-- 粘贴与模板固定在滚动区之外，滚动到哪个编辑框都能用 -->
-      <v-card-text class="tool-bar">
-        <div class="paste-bar">
-          <v-btn size="small" variant="outlined" prepend-icon="mdi-content-paste" @click="pasteFromClipboard">
-            粘贴
-          </v-btn>
-          <v-btn
-            size="small"
-            variant="elevated"
-            color="primary"
-            prepend-icon="mdi-content-paste"
-            @click="pasteAndComplete"
-          >
-            粘贴并完成
-          </v-btn>
-        </div>
-
-        <!-- Template Buttons Section -->
-        <div v-if="templateData" class="mt-4">
-          <div v-if="hasTemplates" class="template-buttons">
-            <!-- Subject specific books -->
-            <template v-if="subjectBooks">
-              <div v-for="(pages, book) in subjectBooks" :key="book" class="button-group">
-                <v-chip
-                  :color="isBookSelected(book) ? 'success' : 'default'"
-                  :variant="isBookSelected(book) ? 'elevated' : 'flat'"
-                  class="ma-1 book-chip"
-                  @click="handleBookClick(book)"
-                >
-                  {{ book }}
-                </v-chip>
-
-                <!-- Show pages only if book is selected -->
-                <div v-if="isBookSelected(book)" class="pages-container mt-2">
-                  <v-chip
-                    v-for="page in pages"
-                    :key="page"
-                    :color="isPageSelected(book, page) ? 'info' : 'default'"
-                    :variant="isPageSelected(book, page) ? 'elevated' : 'flat'"
-                    class="ma-1"
-                    @click="handlePageClick(book, page)"
-                  >
-                    {{ page }}
-                  </v-chip>
-                </div>
-              </div>
-            </template>
-
-            <!-- Common books -->
-            <template v-if="commonBooks">
-              <div v-for="(pages, book) in commonBooks" :key="book" class="button-group">
-                <v-chip
-                  :color="isBookSelected(book) ? 'success' : 'default'"
-                  :variant="isBookSelected(book) ? 'elevated' : 'flat'"
-                  class="ma-1 book-chip"
-                  @click="handleBookClick(book)"
-                >
-                  {{ book }}
-                </v-chip>
-
-                <!-- Show pages only if book is selected -->
-                <div v-if="isBookSelected(book)" class="pages-container mt-2">
-                  <v-chip
-                    v-for="page in pages"
-                    :key="page"
-                    :color="isPageSelected(book, page) ? 'info' : 'default'"
-                    :variant="isPageSelected(book, page) ? 'elevated' : 'flat'"
-                    class="ma-1"
-                    @click="handlePageClick(book, page)"
-                  >
-                    {{ page }}
-                  </v-chip>
-                </div>
-              </div>
-            </template>
-
-            <!-- Actions -->
-            <div v-if="templateData.actions?.length" class="button-group">
-              <v-chip
-                v-for="action in templateData.actions"
-                :key="action"
-                class="ma-1"
+                variant="elevated"
                 color="primary"
-                variant="flat"
-                @click="insertTemplate(action)"
+                prepend-icon="mdi-content-paste"
+                @click="pasteAndComplete"
               >
-                {{ action }}
-              </v-chip>
+                粘贴并完成
+              </v-btn>
+            </div>
+
+            <!-- Template Buttons Section -->
+            <div v-if="templateData" class="mt-4">
+              <div v-if="hasTemplates" class="template-buttons">
+                <!-- 本学科的作业本在前，公共作业本在后 -->
+                <div v-for="group in bookGroups" :key="group.book" class="button-group">
+                  <v-chip
+                    :color="isBookSelected(group.book) ? 'success' : 'default'"
+                    :variant="isBookSelected(group.book) ? 'elevated' : 'flat'"
+                    class="ma-1 book-chip"
+                    @mousedown.prevent
+                    @click="handleBookClick(group.book)"
+                  >
+                    {{ group.book }}
+                  </v-chip>
+
+                  <!-- Show pages only if book is selected -->
+                  <div v-if="isBookSelected(group.book)" class="pages-container mt-2">
+                    <v-chip
+                      v-for="page in group.pages"
+                      :key="page"
+                      :color="isPageSelected(group.book, page) ? 'info' : 'default'"
+                      :variant="isPageSelected(group.book, page) ? 'elevated' : 'flat'"
+                      class="ma-1"
+                      @mousedown.prevent
+                      @click="handlePageClick(group.book, page)"
+                    >
+                      {{ page }}
+                    </v-chip>
+                  </div>
+                </div>
+
+                <!-- Actions -->
+                <div v-if="templateData.actions?.length" class="button-group">
+                  <v-chip
+                    v-for="action in templateData.actions"
+                    :key="action"
+                    class="ma-1"
+                    color="primary"
+                    variant="flat"
+                    @mousedown.prevent
+                    @click="insertTemplate(action)"
+                  >
+                    {{ action }}
+                  </v-chip>
+                </div>
+              </div>
+              <div v-else class="text-center text-body-2 text-disabled mt-2">暂无可用的模板</div>
             </div>
           </div>
-          <div v-else class="text-center text-body-2 text-disabled mt-2">暂无可用的模板</div>
+
+          <!-- Quick Tools Section -->
+          <div class="quick-tools ml-4" style="min-width: 180px">
+            <!-- Numeric Keypad -->
+            <div class="numeric-keypad mb-4">
+              <div class="keypad-row">
+                <v-btn
+                  v-for="n in 3"
+                  :key="n"
+                  class="keypad-btn"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="insertAtCursor(String(n))"
+                >
+                  {{ n }}
+                </v-btn>
+              </div>
+              <div class="keypad-row">
+                <v-btn
+                  v-for="n in 3"
+                  :key="n"
+                  class="keypad-btn"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="insertAtCursor(String(n + 3))"
+                >
+                  {{ n + 3 }}
+                </v-btn>
+              </div>
+              <div class="keypad-row">
+                <v-btn
+                  v-for="n in 3"
+                  :key="n"
+                  class="keypad-btn"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="insertAtCursor(String(n + 6))"
+                >
+                  {{ n + 6 }}
+                </v-btn>
+              </div>
+              <div class="keypad-row">
+                <v-btn
+                  class="keypad-btn"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="insertAtCursor('-')"
+                >
+                  -
+                </v-btn>
+                <v-btn
+                  class="keypad-btn"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="insertAtCursor('0')"
+                >
+                  0
+                </v-btn>
+                <v-btn
+                  class="keypad-btn"
+                  color="error"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="deleteLastChar"
+                >
+                  ←
+                </v-btn>
+              </div>
+              <div class="keypad-row">
+                <v-btn
+                  class="keypad-btn space-btn"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="insertAtCursor(' ')"
+                >
+                  空格
+                </v-btn>
+                <v-btn
+                  class="keypad-btn space-btn"
+                  size="small"
+                  variant="tonal"
+                  @mousedown.prevent
+                  @click="insertAtCursor('\n')"
+                >
+                  换行
+                </v-btn>
+              </div>
+            </div>
+
+            <div class="d-flex flex-wrap quick-texts">
+              <v-btn
+                v-for="text in quickTexts"
+                :key="text"
+                size="small"
+                variant="flat"
+                @mousedown.prevent
+                @click="insertAtCursor(text)"
+              >
+                {{ text }}
+              </v-btn>
+            </div>
+          </div>
         </div>
       </v-card-text>
 
@@ -281,6 +282,17 @@
 import dataProvider from '@/utils/dataProvider'
 import { formatDayName, parseDateString, shiftDateString, toDateString } from '@/utils/date'
 
+// 点在这些元素上（或紧贴着它们）都不算「点空白」，别关面板。
+// 里面不能出现 .v-overlay__content：它是对话框自己的内容容器，整张卡片都在它里面。
+const INTERACTIVE_SELECTOR =
+  'button, a, input, textarea, select, [role="button"], .v-btn, .v-chip, .v-field, .v-list-item'
+// 按下到抬起的位移超过这个值就当作滚动，不关面板
+const TAP_SLOP = 10
+// 离控件这么近以内也算点到了它
+const NEAR_PADDING = 30
+// 打开后 5s 内一动不动就自动关掉，防的是误触打开
+const IDLE_CLOSE_DELAY = 5000
+
 export default {
   name: 'HomeworkEditDialog',
   props: {
@@ -288,50 +300,61 @@ export default {
       type: Boolean,
       required: true,
     },
+    // 既是卡片标题，也是存档里的 key
     title: {
       type: String,
       required: true,
     },
-    initialContent: {
+    // 打开时停在哪一天：外面展示板正在看的那天，这样点哪张卡就是改哪天的
+    initialDate: {
       type: String,
       default: '',
-    },
-    currentDateString: {
-      type: String,
-      default: '',
-    },
-    // 存储用的条目 key：一般就是科目名，没有单独传时退回标题
-    subjectKey: {
-      type: String,
-      default: '',
-    },
-    // 后续日期的作业，形如 [{ dateString, homework }]，按日期升序
-    futureDays: {
-      type: Array,
-      default: () => [],
-    },
-    // 只有当天视图才装载了后续日期的作业，查看其他日期时不能编辑未来
-    allowFuture: {
-      type: Boolean,
-      default: false,
     },
   },
   emits: ['update:modelValue', 'save'],
   data() {
     return {
-      // 日期 -> 正文，切换日期时保留草稿
+      // 日期 -> 正文。翻到别的日期再翻回来时，这一天的改动还在，
+      // 关闭时一次性把所有改动过的日期写回去。
       drafts: {},
       initialDrafts: {},
-      primaryDate: '',
-      secondaryDate: '',
-      // 决定粘贴、模板、快捷键盘作用于哪个编辑框
-      focusedSide: 'primary',
+      // 当前正在编辑哪一天
+      currentDate: '',
       templateData: null,
       currentLine: '',
       currentLineStart: 0,
       currentLineEnd: 0,
       quickTexts: ['课', '题', '例', '变', 'T', 'P'],
+      pickerOpen: false,
+      // 顶部倒计条是否在走，false 表示已经不需要倒计了
+      countdownActive: false,
     }
+  },
+  created() {
+    // 按下位置，不进响应式：只是用来判断这一下算不算「点击空白」
+    this._press = null
+    // 倒计的定时器
+    this._closeTimer = 0
+  },
+  mounted() {
+    // 用捕获阶段监听，按钮、浮层挡在前面也照样能收到
+    document.addEventListener('pointerdown', this.handlePressStart, true)
+    document.addEventListener('pointerup', this.handlePressEnd, true)
+    document.addEventListener('pointercancel', this.cancelPress, true)
+    // 任何一点动静都撤掉倒计：按下、按键、滚轮统统算「有人在用面板」。
+    // 同样走捕获阶段，焦点落到面板外也照样收得到。
+    document.addEventListener('pointerdown', this.cancelCloseCountdown, true)
+    document.addEventListener('keydown', this.cancelCloseCountdown, true)
+    document.addEventListener('wheel', this.cancelCloseCountdown, { capture: true, passive: true })
+  },
+  beforeUnmount() {
+    document.removeEventListener('pointerdown', this.handlePressStart, true)
+    document.removeEventListener('pointerup', this.handlePressEnd, true)
+    document.removeEventListener('pointercancel', this.cancelPress, true)
+    document.removeEventListener('pointerdown', this.cancelCloseCountdown, true)
+    document.removeEventListener('keydown', this.cancelCloseCountdown, true)
+    document.removeEventListener('wheel', this.cancelCloseCountdown, true)
+    this.stopCloseCountdown()
   },
   computed: {
     dialogVisible: {
@@ -342,136 +365,250 @@ export default {
         this.$emit('update:modelValue', value)
       },
     },
-    subject() {
-      // 标题直接就是科目名称
-      return this.title
-    },
-    storageKey() {
-      return this.subjectKey || this.title
-    },
-    // 当前聚焦编辑框的日期
-    activeDate() {
-      return this.focusedSide === 'primary' ? this.primaryDate : this.secondaryDate
-    },
-    // 模板、粘贴、快捷键盘都走这一个入口，作用在聚焦的编辑框上
+    // 正文始终指向当前这一天，模板、粘贴、快捷键盘都走它
     content: {
       get() {
-        return this.drafts[this.activeDate] || ''
+        return this.drafts[this.currentDate] || ''
       },
       set(value) {
-        this.drafts[this.activeDate] = value
+        this.drafts[this.currentDate] = value
       },
     },
-    secondaryDateObj() {
-      return parseDateString(this.secondaryDate)
+    todayString() {
+      return toDateString(new Date())
     },
-    // 未来编辑框不能回到当天，否则和上面的编辑框冲突
-    minSecondaryDate() {
-      return shiftDateString(this.primaryDate, 1)
+    // 打开时停在哪一天。展示板给的是它正在看的那天，
+    // 拿不到（还没初始化）或格式不对时就从今天开始
+    startDate() {
+      return /^\d{8}$/.test(this.initialDate) ? this.initialDate : this.todayString
     },
-    minSecondaryObj() {
-      return parseDateString(this.minSecondaryDate)
+    currentDateObj() {
+      return parseDateString(this.currentDate)
+    },
+    dayName() {
+      return formatDayName(this.currentDate)
+    },
+    // 「下一天」按钮上的文字，直接告诉用户会跳到哪一天
+    nextDayName() {
+      return formatDayName(shiftDateString(this.currentDate, 1))
+    },
+    // 已经不在今天了才给「回到今天」。日期没有下限，「上一天」一直能翻，不用收起
+    canGoToday() {
+      return !!this.currentDate && this.currentDate !== this.todayString
+    },
+    // 模板里的书本：先是本学科的，再是公共的，合成一份列表省得模板里写两遍
+    bookGroups() {
+      const groups = []
+      const push = (books) => {
+        if (!books) return
+        for (const [book, pages] of Object.entries(books)) groups.push({ book, pages })
+      }
+      push(this.templateData?.subjects?.[this.title]?.books)
+      push(this.templateData?.commonSubject?.books)
+      return groups
     },
     hasTemplates() {
-      return !!(this.templateData?.actions?.length || this.subjectBooks || this.commonBooks)
+      return this.bookGroups.length > 0 || !!(this.templateData?.actions?.length)
     },
-    subjectBooks() {
-      if (!this.subject || !this.templateData?.subjects?.[this.subject]?.books) {
-        return null
-      }
-      return this.templateData.subjects[this.subject].books
-    },
-    commonBooks() {
-      if (!this.templateData?.commonSubject?.books) {
-        return null
-      }
-      return this.templateData.commonSubject.books
-    },
-    showQuickTools() {
-      // 快捷键盘一律显示
-      return true
+    // 倒计条的动画时长跟定时器用同一个值，两边才不会差半拍
+    closeCountdownStyle() {
+      return { animationDuration: `${IDLE_CLOSE_DELAY}ms` }
     },
   },
-  watch: {
+watch: {
     async modelValue(newValue) {
       if (newValue) {
-        this.primaryDate = this.currentDateString || toDateString(new Date())
-        const minDate = this.minSecondaryDate
-        const drafts = {}
-        // 当天内容为初始内容；最后一行不是空行时，在文末加一个空行
-        const initial = this.initialContent || ''
-        drafts[this.primaryDate] = initial === '' || initial.endsWith('\n') ? initial : initial + '\n'
-        // 后续日期已填的作业一并载入草稿，默认停在最后一个有内容的那天
-        let lastFilled = ''
-        for (const day of this.futureDays || []) {
-          if (day.dateString < minDate) continue
-          const content = day.homework?.[this.storageKey]?.content
-          if (!content) continue
-          drafts[day.dateString] = content
-          lastFilled = day.dateString
-        }
-        this.secondaryDate = lastFilled || minDate
-        if (drafts[this.secondaryDate] == null) drafts[this.secondaryDate] = ''
-        this.drafts = drafts
-        this.initialDrafts = { ...drafts }
-        this.focusedSide = 'primary'
-        // 加载模板数据
+        this.drafts = {}
+        this.initialDrafts = {}
+        // 从面板出现那一刻开始算，读存档的耗时也算在这 5s 里
+        this.startCloseCountdown()
+        await this.loadContent(this.startDate)
+        this.$nextTick(() => {
+          this.focusInput()
+          this.updateCurrentLine()
+        })
+        // 模板与正文无关，慢一点加载即可
         try {
           this.templateData = await dataProvider.loadData('classworks-config-homework-template')
         } catch (error) {
           console.error('Failed to load homework templates:', error)
           this.templateData = null
         }
-        this.$nextTick(() => {
-          this.focusActiveArea()
-          this.updateCurrentLine()
-        })
+      } else {
+        this.stopCloseCountdown()
       }
     },
   },
   methods: {
-    dayName(dateString) {
-      return formatDayName(dateString)
+    // 顶部倒计条：走满 5s 就自动关掉。倒计只从打开那一刻起算，
+    // 面板里任何一点动静都会把它撤掉，此后不再自动关。
+    // 条走完靠 CSS 动画，和这里的定时器同时起步，不会出现条没走完就关。
+    startCloseCountdown() {
+      this.stopCloseCountdown()
+      this.countdownActive = true
+      this._closeTimer = window.setTimeout(() => {
+        this._closeTimer = 0
+        this.countdownActive = false
+        this.autoCloseOnIdle()
+      }, IDLE_CLOSE_DELAY)
     },
-    setDraft(dateString, value) {
-      this.drafts[dateString] = value
+
+    stopCloseCountdown() {
+      if (this._closeTimer) window.clearTimeout(this._closeTimer)
+      this._closeTimer = 0
+      this.countdownActive = false
     },
-    // 失焦不清空，最后点过的编辑框继续接收粘贴、模板和快捷键盘
-    onSideFocused(side, focused) {
-      if (focused) this.focusedSide = side
+
+    // 已经在倒计才需要撤，白名单外的按键（比如修饰键）也照样算数
+    cancelCloseCountdown() {
+      if (!this._closeTimer) return
+      this.stopCloseCountdown()
     },
-    canStepSecondary(offset) {
-      return shiftDateString(this.secondaryDate, offset) >= this.minSecondaryDate
+
+    // 倒计走完：正文被动过就不关，交给用户继续编辑
+    autoCloseOnIdle() {
+      if (this.changedDrafts().length) return
+      this.handleClose()
     },
-    stepSecondary(offset) {
-      if (!this.canStepSecondary(offset)) return
-      this.selectSecondaryDate(shiftDateString(this.secondaryDate, offset))
+
+    // 切到某一天：没访问过就读存档存成草稿，访问过就直接用草稿
+    async loadContent(dateString) {
+      this.currentDate = dateString
+      if (this.drafts[dateString] != null) return
+      let content = ''
+      try {
+        const data = await dataProvider.loadData('classworks-data-' + dateString)
+        if (data && data.success !== false) content = data.homework?.[this.title]?.content || ''
+      } catch (error) {
+        console.error('读取作业失败:', error)
+      }
+      this.initialDrafts[dateString] = content
+      // 最后一行不是空行时，在文末补一个空行，方便接着写下一条
+      this.drafts[dateString] = content === '' || content.endsWith('\n') ? content : content + '\n'
     },
-    selectSecondaryDate(value) {
+    // 过去的日子也翻得动，所以两个方向都不设限
+    shiftDate(offset) {
+      this.goToDate(shiftDateString(this.currentDate, offset))
+    },
+    goToday() {
+      if (this.currentDate === this.todayString) return
+      this.goToDate(this.todayString)
+    },
+    selectDate(value) {
       const next = value instanceof Date ? toDateString(value) : value
-      if (!next || next < this.minSecondaryDate) return
-      this.secondaryDate = next
-      // 新日期还没有草稿，先占位，免得输入内容被丢弃
-      if (this.drafts[next] == null) this.drafts[next] = ''
+      if (!/^\d{8}$/.test(next) || next === this.currentDate) return
+      this.goToDate(next)
+    },
+    async goToDate(dateString) {
+      await this.loadContent(dateString)
       this.$nextTick(() => {
-        this.focusedSide = 'secondary'
-        this.focusActiveArea()
+        this.focusInput()
         this.updateCurrentLine()
       })
     },
-    activeRef() {
-      return this.focusedSide === 'primary' ? this.$refs.primaryRef : this.$refs.secondaryRef
+    focusInput() {
+      if (this.$refs.inputRef) this.$refs.inputRef.focus()
     },
-    activeTextarea() {
-      const ref = this.activeRef()
+    // 关闭判定统一走「按下—抬起」这一段手势，自己掌控，不依赖 Vuetify 的 click:outside
+    // （浮层叠起来时它的 closeConditional 会因为 localTop 为 false 而永不触发）。
+    // 面板内：只有落在空白处才关；面板外（遮罩）：轻点就关。
+    handlePressStart(event) {
+      if (!this.dialogVisible || event.button > 0) return
+      // 多指触摸：只认第一根手指
+      if (this._press && this._press.pointerId !== event.pointerId) return
+      const content = this.dialogContent()
+      this._press = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        inside: !!content?.contains(event.target),
+        pickerOpen: this.pickerOpen,
+      }
+    },
+
+    handlePressEnd(event) {
+      const press = this._press
+      this._press = null
+      if (!this.dialogVisible || !press || press.pointerId !== event.pointerId) return
+      // 触屏滚动：按下到抬起之间移动过就不是「点击」
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP) return
+      // 这一下是专门用来收起日期选择器的（点在它外面），别顺带把面板也关了
+      if (press.pickerOpen && !this.insideFloatingOverlay(event.clientX, event.clientY)) return
+      if (this.nearInteractive(event.clientX, event.clientY)) return
+      this.handleClose()
+    },
+
+    cancelPress() {
+      this._press = null
+    },
+
+    // 对话框自己的内容容器：日期选择器虽然渲染在卡片内部，但属于另一个 .v-overlay__content。
+    // v-dialog 的根是 Fragment，$el 拿不到元素，所以靠 content-class 定位。
+    dialogContent() {
+      return document.querySelector('.homework-dialog-content')
+    },
+
+    // 这一下落在日期选择器之类的浮层里吗（浮层渲染在卡片内部，但不是对话框自己的容器）。
+    // 外面工具栏的选择器是另一个实例，各关各的。
+    insideFloatingOverlay(x, y) {
+      const ownContent = this.dialogContent()
+      for (const el of document.elementsFromPoint(x, y) || []) {
+        const overlay = el.closest?.('.v-overlay__content')
+        if (overlay && overlay !== ownContent) return true
+      }
+      return false
+    },
+
+    // 这一下像是想点某个控件吗
+    nearInteractive(x, y) {
+      if (this.insideFloatingOverlay(x, y)) return true
+      for (const el of document.elementsFromPoint(x, y) || []) {
+        if (el.closest?.(INTERACTIVE_SELECTOR)) return true
+      }
+      // 手抖点偏了：附近 10px 内还有控件，也不关
+      for (const el of document.querySelectorAll(INTERACTIVE_SELECTOR)) {
+        const rect = el.getBoundingClientRect()
+        if (rect.width === 0 && rect.height === 0) continue
+        if (
+          x >= rect.left - NEAR_PADDING &&
+          x <= rect.right + NEAR_PADDING &&
+          y >= rect.top - NEAR_PADDING &&
+          y <= rect.bottom + NEAR_PADDING
+        ) {
+          return true
+        }
+      }
+      return false
+    },
+
+    // Esc 与 Ctrl/Cmd+S 都当作「完成编辑」，和点空白一样走保存流程
+    handleKeydown(event) {
+      const isSave = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's'
+      if (event.key !== 'Escape' && !isSave) return
+      // 日期选择器开着时，Esc 只收选择器，面板留着继续编辑；
+      // 选择器里的方向键、回车等不在这里处理，原样放给 Vuetify。
+      if (this.pickerOpen && event.key === 'Escape') {
+        this.pickerOpen = false
+        event.stopPropagation()
+        return
+      }
+      // Ctrl+S 默认会弹出浏览器的「保存网页」对话框，Esc 也别漏给 Vuetify 自己那套
+      event.preventDefault()
+      event.stopPropagation()
+      this.handleClose()
+    },
+    getTextarea() {
+      const ref = this.$refs.inputRef
       return ref ? ref.$el.querySelector('textarea') : null
     },
-    focusActiveArea() {
-      const ref = this.activeRef()
-      if (ref && ref.focus) ref.focus()
+    // 关闭时把所有改动过的日期一起交回去，不只是当前看得见的那天
+    handleClose() {
+      const entries = this.changedDrafts()
+      if (entries.length) this.$emit('save', entries)
+      this.dialogVisible = false
     },
-    // 收集所有改动过的日期
-    collectChangedEntries() {
+    // 改动过的日期：正文和读进来时不一致就算改过（首尾空白不算改动）
+    changedDrafts() {
       const entries = []
       for (const dateString of Object.keys(this.drafts)) {
         const content = (this.drafts[dateString] || '').trim()
@@ -481,13 +618,8 @@ export default {
       }
       return entries
     },
-    handleClose() {
-      const entries = this.collectChangedEntries()
-      if (entries.length) this.$emit('save', entries)
-      this.dialogVisible = false
-    },
     updateCurrentLine() {
-      const textarea = this.activeTextarea()
+      const textarea = this.getTextarea()
       if (!textarea) return
       const cursorPosition = textarea.selectionStart
       const content = this.content
@@ -537,7 +669,7 @@ export default {
         this.content = (hasContent ? this.content.trim() + '\n' : '') + book
       }
       this.$nextTick(() => {
-        const textarea = this.activeTextarea()
+        const textarea = this.getTextarea()
         if (!textarea) return
         textarea.focus()
 
@@ -584,7 +716,7 @@ export default {
           this.content.slice(end)
       }
       this.$nextTick(() => {
-        const textarea = this.activeTextarea()
+        const textarea = this.getTextarea()
         if (!textarea) return
         textarea.focus()
 
@@ -603,7 +735,7 @@ export default {
       })
     },
     insertTemplate(text) {
-      const textarea = this.activeTextarea()
+      const textarea = this.getTextarea()
       if (!textarea) return
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
@@ -624,7 +756,7 @@ export default {
     insertAtCursor(text) {
       if (!text) return
 
-      const textarea = this.activeTextarea()
+      const textarea = this.getTextarea()
       if (!textarea) return
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
@@ -639,7 +771,7 @@ export default {
       })
     },
     deleteLastChar() {
-      const textarea = this.activeTextarea()
+      const textarea = this.getTextarea()
       if (!textarea) return
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
@@ -669,7 +801,7 @@ export default {
     async buildContentWithPaste() {
       const text = await navigator.clipboard.readText()
       if (text == null || text === '') return null
-      const textarea = this.activeTextarea()
+      const textarea = this.getTextarea()
       if (!textarea) return null
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
@@ -685,7 +817,7 @@ export default {
         if (!result) return
         this.content = result.content
         this.$nextTick(() => {
-          const textarea = this.activeTextarea()
+          const textarea = this.getTextarea()
           if (!textarea) return
           textarea.focus()
           textarea.setSelectionRange(result.cursorPosition, result.cursorPosition)
@@ -695,13 +827,13 @@ export default {
         console.error('Failed to read clipboard:', error)
       }
     },
-    // 从剪贴板粘贴并直接保存关闭；只保存当前聚焦的那个编辑框
+    // 从剪贴板粘贴并直接保存关闭
     async pasteAndComplete() {
       try {
         const result = await this.buildContentWithPaste()
         if (!result) return
         this.content = result.content
-        this.$emit('save', [{ dateString: this.activeDate, content: this.content.trim() }])
+        this.$emit('save', [{ dateString: this.currentDate, content: this.content.trim() }])
         this.dialogVisible = false
       } catch (error) {
         console.error('Failed to read clipboard:', error)
@@ -712,47 +844,41 @@ export default {
 </script>
 
 <style scoped>
-/* 卡片整体限高，超出时由中间的编辑区滚动，粘贴与模板始终留在视野内 */
-.hw-dialog {
-  display: flex;
-  flex-direction: column;
-  max-height: 92vh;
-}
-
-/* 左边编辑区滚动，右边快捷键盘原地不动 */
-.editor-row {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
+/* 顶部倒计条：贴在卡片顶边的一条细线，5s 内不走完就自动关掉面板。
+   颜色取 currentColor 再压到很低的透明度，深色下是浅灰、浅色下是深灰，不抢注意力 */
+.close-countdown {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
   overflow: hidden;
+  /* 纯装饰，别挡住标题栏的点击 */
+  pointer-events: none;
 }
 
-.dialog-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
+.close-countdown-bar {
+  height: 100%;
+  background: currentColor;
+  opacity: 0.2;
+  transform-origin: left center;
+  animation-name: close-countdown-drain;
+  animation-timing-function: linear;
+  /* forwards：走完后停在空处，不会闪回满格 */
+  animation-fill-mode: forwards;
 }
 
-.quick-tools {
-  flex: 0 0 auto;
-  overflow: hidden;
+/* 时长由 closeCountdownStyle 绑进来，和自动关闭用的是同一个值 */
+@keyframes close-countdown-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
-.tool-bar {
-  flex: 0 0 auto;
-  max-height: 30vh;
-  overflow-y: auto;
-}
-
-/* 粘贴按钮按整张卡片居中，不跟着上面的两栏走 */
-.paste-bar {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-}
-
-/* 日期小标题：后一个编辑框右侧放切换日期的按钮 */
+/* 日期小标题：右侧放切换日期的按钮 */
 .date-caption {
   display: flex;
   align-items: center;
@@ -762,9 +888,10 @@ export default {
   margin-bottom: 4px;
 }
 
-/* 编辑框内部不出滚动条，滚动统一交给外面的编辑区 */
+/* 编辑框撑满左栏宽度；内部不出滚动条 */
 .hw-area {
   --v-textarea-scroll-bar-width: 0;
+  width: 100%;
 }
 
 .hw-area :deep(textarea) {
@@ -774,6 +901,14 @@ export default {
 
 .hw-area :deep(textarea::-webkit-scrollbar) {
   display: none;
+}
+
+/* 粘贴按钮按整张卡片居中 */
+.paste-bar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .template-buttons {
@@ -793,24 +928,16 @@ export default {
   padding-left: 16px;
 }
 
-.group-label {
-  font-size: 0.875rem;
-  color: rgba(0, 0, 0, 0.6);
-  margin-right: 8px;
-  white-space: nowrap;
-}
-
 :deep(.v-chip) {
   cursor: pointer;
   user-select: none;
 }
 
 .quick-tools {
-  border-left: 1px solid rgba(0, 0, 0, 0.12);
-  padding-left: 16px;
+  border-left: none;
 }
 
-.gap-1 {
+.quick-texts {
   gap: 4px;
 }
 
@@ -818,9 +945,7 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 4px;
+  padding: 4px;
 }
 
 .keypad-row {

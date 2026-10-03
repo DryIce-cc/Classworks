@@ -25,7 +25,7 @@
 </template>
 
 <script>
-import { defineComponent, ref, onBeforeUnmount, nextTick } from 'vue'
+import { defineComponent, ref, nextTick } from 'vue'
 import messageService from '@/utils/message'
 
 export default defineComponent({
@@ -48,7 +48,8 @@ export default defineComponent({
       info: 'info',
     }
 
-    const unsubscribe = messageService?.onSnackbar?.(async (msg) => {
+    // 新的消息到来时先收起当前这条，避免连点时高亮停在旧内容上
+    messageService.onSnackbar(async (msg) => {
       if (!msg) return
       if (snackbar.value) {
         snackbar.value = false
@@ -58,11 +59,7 @@ export default defineComponent({
       snackbar.value = true
     })
 
-    onBeforeUnmount(() => unsubscribe?.())
-
     return { snackbar, message, icons, colors }
   },
 })
 </script>
-
-<style scoped></style>

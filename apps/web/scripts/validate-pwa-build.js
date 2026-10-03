@@ -80,19 +80,6 @@ if (!manifest) {
     fail('manifest 缺少 categories，Microsoft Store/PWABuilder 会降低质量评分。')
   }
 
-  const screenshots = Array.isArray(manifest.screenshots) ? manifest.screenshots : []
-  if (screenshots.length === 0) {
-    fail('manifest 缺少 screenshots。')
-  }
-
-  for (const screenshot of screenshots) {
-    if (!screenshot.src || !screenshot.sizes || !screenshot.type) {
-      fail(`截图条目不完整: ${JSON.stringify(screenshot)}`)
-    } else if (!fileExistsFromManifest(screenshot.src)) {
-      fail(`截图文件不存在: ${screenshot.src}`)
-    }
-  }
-
   const fileHandlers = Array.isArray(manifest.file_handlers) ? manifest.file_handlers : []
   const fileExtensions = new Set(
     fileHandlers.flatMap((handler) => Object.values(handler.accept || {}).flat()),

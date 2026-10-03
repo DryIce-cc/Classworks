@@ -12,11 +12,10 @@
         <div v-for="item in col" :key="item.key" class="grid-item" :data-key="item.key">
           <v-card
             border
-            class="hw-card"
-            :class="item.editKey ? 'cursor-pointer' : ''"
+            class="hw-card cursor-pointer"
             height="100%"
             rounded="md"
-            @click="onCardClick(item)"
+            @click="$emit('open-dialog', item.key)"
           >
             <!-- 科目名独占一行，小标题按段落正常单独显示 -->
             <v-card-title class="hw-card-title" :style="contentStyle">
@@ -42,8 +41,8 @@
       </TransitionGroup>
     </div>
 
-    <!-- 空科目 + 常驻的「其他」入口 -->
-    <div class="empty-subjects mt-4">
+    <!-- 尚无作业的科目：点一下开始填写 -->
+    <div ref="emptySubjects" class="empty-subjects mt-4">
       <div class="empty-subjects-grid">
         <TransitionGroup name="v-list">
           <v-card
@@ -62,18 +61,6 @@
               <div class="text-caption text-grey">点击添加作业</div>
             </v-card-text>
           </v-card>
-          <v-card
-            border
-            rounded="md"
-            class="empty-subject-card"
-            @click="$emit('open-dialog', '其他')"
-          >
-            <v-card-title class="text-subtitle-1"> 其他 </v-card-title>
-            <v-card-text class="text-center">
-              <v-icon color="grey" size="small"> mdi-plus </v-icon>
-              <div class="text-caption text-grey">点击添加其他</div>
-            </v-card-text>
-          </v-card>
         </TransitionGroup>
       </div>
     </div>
@@ -81,17 +68,23 @@
 </template>
 
 <script>
+// 窗口常年最大化，列数固定，不再按宽度分档
+const MAX_COLUMNS = 3
+// 「点击添加作业」卡片露在视野里又没人理，3s 后就把它上滑出去
+const IDLE_SCROLL_DELAY = 3000
+
 export default {
   name: 'HomeworkGrid',
   props: {
     sortedItems: { type: Array, required: true },
     unusedSubjects: { type: Array, required: true },
     contentStyle: { type: Object, default: () => ({}) },
+    // 作业编辑面板开着时页面不能动，自动上滑也一并停掉
+    paused: { type: Boolean, default: false },
   },
   emits: ['open-dialog'],
   data() {
     return {
-      viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
       // 布局版本号：分列结果变化时才 +1，避免量高度触发无限重渲染
       layoutVersion: 0,
     }
@@ -101,19 +94,15 @@ export default {
     this._heights = {}
     this._gap = 0
     this._signature = ''
+    // 待执行的自动上滑的定时器
+    this._scrollTimer = 0
   },
   computed: {
-    // 宽度档位对应的最大列数
-    maxColumnsByWidth() {
-      if (this.viewportWidth < 800) return 1
-      if (this.viewportWidth < 1200) return 2
-      return 3
-    },
     // 卡片少时收缩列数，让卡片铺满可用宽度
     effectiveColumns() {
       const count = this.sortedItems ? this.sortedItems.length : 0
       if (count <= 0) return 1
-      return Math.max(1, Math.min(count, this.maxColumnsByWidth))
+      return Math.max(1, Math.min(count, MAX_COLUMNS))
     },
     // 渲染用的分列结果（透传方法，保证每次拿到的都是现算的）
     columnItems() {
@@ -123,24 +112,87 @@ export default {
     },
   },
   mounted() {
-    this.updateViewportWidth()
-    window.addEventListener('resize', this.handleResize)
     // 首屏同步量一次（此时 DOM 已就绪、通常还未绘制），避免先闪一下再重排
     this.updateLayout()
     // 字体后加载会改变卡片高度，加载完再平衡一次
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => this.updateLayout())
     }
+    window.addEventListener('scroll', this.handleViewportChange, { passive: true })
+    window.addEventListener('resize', this.handleViewportChange, { passive: true })
+    // 捕获阶段，用户碰一下就撤销待执行的上滑
+    document.addEventListener('pointerdown', this.cancelIdleScroll, true)
+    this.armIdleScroll()
   },
   updated() {
     this.$nextTick(() => {
       this.updateLayout()
+      // 卡片增减会改变视野里的那一段，重新判断要不要计时
+      this.armIdleScroll()
     })
   },
   beforeUnmount() {
-    window.removeEventListener('resize', this.handleResize)
+    this.cancelIdleScroll()
+    window.removeEventListener('scroll', this.handleViewportChange)
+    window.removeEventListener('resize', this.handleViewportChange)
+    document.removeEventListener('pointerdown', this.cancelIdleScroll, true)
+  },
+  watch: {
+    paused(value) {
+      if (value) {
+        this.cancelIdleScroll()
+        return
+      }
+      // 面板关掉了，卡片区还露着就接着算
+      this.$nextTick(() => this.armIdleScroll())
+    },
   },
   methods: {
+    // 页面滚了或窗口变了：先撤销待执行的上滑（人已经自己在动了），
+    // 再按当前位置重新判断，所以计时总是从「最后一次动静」算起
+    handleViewportChange() {
+      this.cancelIdleScroll()
+      this.armIdleScroll()
+    },
+
+    // 已经在计时就别重置，否则每次重排都会把上滑往后顺延一次
+    armIdleScroll() {
+      if (this._scrollTimer || this.paused || !this.shouldHideEmptySubjects()) return
+      this._scrollTimer = window.setTimeout(() => {
+        this._scrollTimer = 0
+        this.hideEmptySubjects()
+      }, IDLE_SCROLL_DELAY)
+    },
+
+    cancelIdleScroll() {
+      if (this._scrollTimer) window.clearTimeout(this._scrollTimer)
+      this._scrollTimer = 0
+    },
+
+    // 「点击添加作业」卡片还露在视野里、且页面没滑到顶，就该把它上滑出去
+    shouldHideEmptySubjects() {
+      const el = this.$refs.emptySubjects
+      if (!el || !this.unusedSubjects?.length) return false
+      if (window.scrollY <= 0) return false
+      const rect = el.getBoundingClientRect()
+      // 上下都出了视野都不算「显示在可视区域」；
+      // 只露一条边就当已经出去了，免得正好停在边界上反复触发
+      return rect.bottom > 1 && rect.top < window.innerHeight - 1
+    },
+
+    // 往页首方向滚时，内容整体是往下移的，所以是把整块卡片区推出视口下沿。
+    // 要滚的距离超过剩下的高度，就只能到页首为止。
+    hideEmptySubjects() {
+      const el = this.$refs.emptySubjects
+      // 这 3s 里情况可能已经变了（卡片被填掉、页面被滚回顶），到点再确认一次
+      if (!el || !this.shouldHideEmptySubjects()) return
+      const distance = Math.min(window.scrollY, window.innerHeight - el.getBoundingClientRect().top)
+      if (distance <= 0) return
+      // 交给原生的平滑滚动：时长和曲线由浏览器定，但各环境表现一致，
+      // 自己用 rAF 一步步挪反而容易碰上 behavior: 'instant' 不被支持而整段失效
+      window.scrollTo({ top: window.scrollY - distance, behavior: 'smooth' })
+    },
+
     // 按实测高度把每张卡放进当前最矮的列（贪心）。
     // 各列等宽，卡片高度与分列结果无关，所以量一次就能收敛，不会循环。
     // 还没量到高度时（首屏第一帧）按序号取余，保证有内容可量。
@@ -174,21 +226,12 @@ export default {
       })
       return cols
     },
-    updateViewportWidth() {
-      this.viewportWidth = window.innerWidth
-    },
-    handleResize() {
-      // 宽度变化会改变卡片宽度从而改变高度；断点变化会走 updated，断点内变化走这里
-      this.updateViewportWidth()
-      this.updateLayout()
-    },
     // 实测每张卡片高度，按签名变化才触发重排，保证收敛不循环
     updateLayout() {
       const container = this.$refs.gridContainer
       if (!container) return
       const colEl = container.querySelector('.grid-column')
-      const gap = colEl ? parseFloat(window.getComputedStyle(colEl).rowGap) || 0 : 0
-      this._gap = gap
+      this._gap = colEl ? parseFloat(window.getComputedStyle(colEl).rowGap) || 0 : 0
       const heights = {}
       container.querySelectorAll('.grid-item').forEach((el) => {
         if (el.dataset.key) heights[el.dataset.key] = el.offsetHeight
@@ -205,9 +248,6 @@ export default {
     // 自定义小标题和日期只要有一个就有小标题；都没有时只留分割线
     hasLabel(block) {
       return !!(block && (block.custom || block.date))
-    },
-    onCardClick(item) {
-      if (item.editKey) this.$emit('open-dialog', item.editKey)
     },
     // 一张卡片的全部内容块：每天的正文按空行拆段，每段配一个小标题。
     // 有自定义小标题就是「日期的 + 自定义小标题」，没有则是「日期的作业」，
@@ -249,13 +289,19 @@ export default {
       if (block) blocks.push(block)
 
       return blocks.map((lines) => {
-        const isHeading = lines[0].startsWith('# ')
+        const isHeading = lines[0].startsWith('#')
         if (!isHeading) return { heading: '', lines }
-        // 「# 」后面多写的空格按原样保留：# 你好 / #  你好 / #   你好 -> 你好 /  你好 /   你好
+
         const rest = lines.slice(1)
         // 没有正文就整行当普通正文渲染，连「#」原文一起保留
         if (!rest.length) return { heading: '', lines: [lines[0]] }
-        return { heading: lines[0].slice(2), lines: rest }
+
+        // 核心修改：
+        // 1. lines[0].slice(1) 先去掉开头的 '#'
+        // 2. .replace(/^ /, '') 再去掉紧接着的第一个空格（如果存在的话）
+        const headingText = lines[0].slice(1).replace(/^ /, '')
+
+        return { heading: headingText, lines: rest }
       })
     },
   },

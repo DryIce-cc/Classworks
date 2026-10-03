@@ -60,16 +60,6 @@ export default {
       default: false,
     },
   },
-
-  methods: {
-    onSettingUpdate(key, value) {
-      this.$emit('update', key, value)
-    },
-
-    onSettingError(key) {
-      this.$emit('error', key)
-    },
-  },
 }
 </script>
 

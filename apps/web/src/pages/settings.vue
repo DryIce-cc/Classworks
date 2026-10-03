@@ -52,7 +52,6 @@
 import HomeworkTemplateCard from '@/components/settings/cards/HomeworkTemplateCard.vue'
 import SubjectManagementCard from '@/components/settings/cards/SubjectManagementCard.vue'
 import SettingsExplorer from '@/components/settings/SettingsExplorer.vue'
-import '../styles/settings.scss'
 
 export default {
   name: 'Settings',

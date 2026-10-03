@@ -1,10 +1,6 @@
 <template>
   <settings-card :loading="loading" border icon="mdi-book-edit" title="作业模板配置">
     <!-- 顶部操作按钮 -->
-    <v-alert v-if="error" class="mb-4" closable type="error" variant="tonal">
-      {{ error }}
-    </v-alert>
-
     <div class="d-flex justify-space-between align-center mb-6">
       <div>
         <v-btn
@@ -218,7 +214,7 @@
               </v-col>
 
               <v-col
-                v-if="['subjectBook', 'commonBook'].includes(dialog.editedItem.type)"
+                v-if="dialog.editedItem.type === 'subjectBook'"
                 cols="12"
               >
                 <v-card variant="outlined">
@@ -329,7 +325,6 @@ export default {
   data() {
     return {
       loading: false,
-      error: null,
       config: reactive(JSON.parse(JSON.stringify(DEFAULT_CONFIG))),
       originalConfig: null,
       newSubject: '',
@@ -337,9 +332,7 @@ export default {
       newAction: '',
       newTask: '',
       editedSubjects: {},
-      editedBookTypes: {},
       newBookTypes: {},
-      newBooks: {},
       showSnackbar: false,
       snackbarText: '',
       snackbarColor: 'success',
@@ -350,9 +343,8 @@ export default {
         nameLabel: '',
         editedItem: {
           name: '',
-          type: '', // 'book', 'commonBook', 'action'
+          type: '', // 'subjectBook' | 'action'
           subject: '',
-          bookType: '',
           originalName: '',
           tasks: [],
         },
@@ -381,22 +373,22 @@ export default {
       this.loading = true
       try {
         const response = await dataProvider.loadData('classworks-config-homework-template')
-        if (response) {
-          // 数据存在且加载成功
-          const config = response
-          Object.assign(this.config, config)
-          this.originalConfig = JSON.parse(JSON.stringify(config))
-          this.isNewConfig = false
-          this.showMessage('配置已加载', 'success')
-        } else if (response.error?.code === 'NOT_FOUND') {
-          // 数据不存在，使用默认配置
-          this.showMessage('使用默认配置', 'info')
-          this.isNewConfig = true
-        } else {
-          // 其他错误，继续使用当前配置
-          const errorMsg = response.error?.message || '加载失败'
-          this.showMessage(`加载失败: ${errorMsg}，可继续编辑当前配置`, 'warning')
+        // 读不到 key 时 dataProvider 会返回 { success: false }，必须判 success 而不是判真值
+        if (response.success === false) {
+          if (response.error?.code === 'NOT_FOUND') {
+            // 首次使用，保留默认配置
+            this.showMessage('使用默认配置', 'info')
+            this.isNewConfig = true
+          } else {
+            const errorMsg = response.error?.message || '加载失败'
+            this.showMessage(`加载失败: ${errorMsg}，可继续编辑当前配置`, 'warning')
+          }
+          return
         }
+        this.originalConfig = JSON.parse(JSON.stringify(response))
+        Object.assign(this.config, response)
+        this.isNewConfig = false
+        this.showMessage('配置已加载', 'success')
       } catch (error) {
         // 发生错误，继续使用当前配置
         console.error('Failed to load config:', error)
@@ -412,13 +404,12 @@ export default {
           'classworks-config-homework-template',
           this.config,
         )
-        if (response) {
-          this.originalConfig = JSON.parse(JSON.stringify(this.config))
-          this.isNewConfig = false
-          this.showMessage('配置已保存', 'success')
-        } else {
-          throw new Error(response || '保存失败')
+        if (response.success === false) {
+          throw new Error(response.error?.message || '保存失败')
         }
+        this.originalConfig = JSON.parse(JSON.stringify(this.config))
+        this.isNewConfig = false
+        this.showMessage('配置已保存', 'success')
       } catch (error) {
         console.error('Failed to save config:', error)
         this.showMessage(`保存失败: ${error.message}，请稍后重试`, 'error')
@@ -464,41 +455,11 @@ export default {
       this.newBookTypes[subject] = ''
     },
 
-    updateBookType(subject, oldType) {
-      const key = `${subject}-${oldType}`
-      const newType = this.editedBookTypes[key]
-      if (newType && newType !== oldType) {
-        const books = this.config.subjects[subject].books[oldType]
-        this.config.subjects[subject].books[newType] = books
-        delete this.config.subjects[subject].books[oldType]
-      }
-      delete this.editedBookTypes[key]
-    },
-
     deleteBookType(subject, bookType) {
       if (subject === 'common') {
         delete this.config.commonSubject.books[bookType]
       } else {
         delete this.config.subjects[subject].books[bookType]
-      }
-    },
-
-    addBook(subject, bookType) {
-      const key = `${subject}-${bookType}`
-      const newBook = this.newBooks[key]
-      if (!newBook) return
-
-      if (!this.config.subjects[subject].books[bookType].includes(newBook)) {
-        this.config.subjects[subject].books[bookType].push(newBook)
-      }
-      this.newBooks[key] = ''
-    },
-
-    removeBook(subject, bookType, book) {
-      const books = this.config.subjects[subject].books[bookType]
-      const index = books.indexOf(book)
-      if (index > -1) {
-        books.splice(index, 1)
       }
     },
 
@@ -508,10 +469,6 @@ export default {
         this.config.commonSubject.books[this.newCommonBook] = []
       }
       this.newCommonBook = ''
-    },
-
-    removeCommonBook(book) {
-      delete this.config.commonSubject.books[book]
     },
 
     addAction() {
@@ -526,34 +483,6 @@ export default {
       const index = this.config.actions.indexOf(action)
       if (index > -1) {
         this.config.actions.splice(index, 1)
-      }
-    },
-
-    openBookDialog(subject, bookType, book) {
-      this.dialog.show = true
-      this.dialog.title = '编辑需完成部分'
-      this.dialog.nameLabel = '部分名称'
-      this.dialog.editedItem = {
-        name: book,
-        type: 'book',
-        subject,
-        bookType,
-        originalName: book,
-        tasks: this.config.subjects[subject].books[bookType],
-      }
-    },
-
-    openCommonBookDialog(book) {
-      this.dialog.show = true
-      this.dialog.title = '编辑通用作业本'
-      this.dialog.nameLabel = '作业本名称'
-      this.dialog.editedItem = {
-        name: book,
-        type: 'commonBook',
-        originalName: book,
-        tasks: Array.isArray(this.config.commonSubject.books[book])
-          ? [...this.config.commonSubject.books[book]]
-          : [],
       }
     },
 
@@ -635,7 +564,6 @@ export default {
       }
 
       this.closeDialog()
-      //this.showMessage('修改成功', 'success');
     },
 
     closeDialog() {
