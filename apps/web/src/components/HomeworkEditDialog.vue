@@ -344,6 +344,18 @@ const TAP_SLOP = 10
 const NEAR_PADDING = 30
 // 打开后 5s 内一动不动就自动关掉，防的是误触打开
 const IDLE_CLOSE_DELAY = 7000
+// 正文末尾留几个空行，方便接着写下一条。面板从「继续添加作业」卡片进来时会抬到 2
+// （appendBlankLines），但那是「另起一份」的排版需求，只对正在编辑的那天成立
+const DEFAULT_BLANK_LINES = 1
+
+// 把若干块预定内容接到那天已有正文后面，返回新正文。
+// 落进草稿（完成编辑时）和拼进预览快照用的是同一个函数，两边算出来的必须一致，
+// 否则展示板上看到的和最后存下来的不是一回事
+function assembleDayContent(existing, blocks) {
+  let lines = existing ? existing.trim().split('\n') : []
+  for (const block of blocks) lines = spliceIntoDay(lines, block.heading, block.lines)
+  return lines.join('\n')
+}
 
 // 从 ownerStart 起删掉一整行。标题没了，它下面那段正文就露出来了——
 // 上面要是还有个小标题，得空一行隔开，不然这段会被顺手收进那个标题里；
@@ -392,7 +404,7 @@ export default {
       default: () => [],
     },
   },
-  emits: ['update:modelValue', 'save'],
+  emits: ['update:modelValue', 'save', 'preview'],
   data() {
     return {
       // 日期 -> 正文。翻到别的日期再翻回来时，这一天的改动还在，
@@ -424,6 +436,13 @@ export default {
     this._press = null
     // 倒计的定时器
     this._closeTimer = 0
+    // 目标日的存档正文，日期 -> 正文。预览要同步拿这份底稿算拼装结果，
+    // 不能每敲一个字就等一次 IndexedDB，所以读过一次就留着
+    this._baseCache = {}
+    // 同一时刻正在读的目标日，日期 -> Promise，避免并发时重复打存档
+    this._baseLoads = {}
+    // 预览的世代号：读存档是异步的，回来时正文可能又变了，过期的那份直接扔掉
+    this._previewToken = 0
   },
   mounted() {
     // 用捕获阶段监听，按钮、浮层挡在前面也照样能收到
@@ -574,10 +593,20 @@ export default {
     },
   },
   watch: {
+    // 正文一动就把预览推给展示板。存盘不归这里管——预览只是给外面看，
+    // 真正写盘仍然只发生在完成编辑（以及翻日期时的预定内容，见 switchDate）
+    drafts: {
+      deep: true,
+      handler() {
+        this.pushPreview()
+      },
+    },
     async modelValue(newValue) {
       if (newValue) {
         this.drafts = {}
         this.initialDrafts = {}
+        // 上一次编辑读过的存档作废：这段时间里存档可能已经被写过了
+        this._baseCache = {}
         // 从面板出现那一刻开始算，读存档的耗时也算在这 5s 里
         this.startCloseCountdown()
         await this.loadContent(this.startDate)
@@ -637,15 +666,21 @@ this.$nextTick(() => {
       } catch (error) {
         console.error('读取作业失败:', error)
       }
-      this.initialDrafts[dateString] = content
-      this.drafts[dateString] = this.padTrailingBlankLines(content)
+      // 读进来先去掉首尾空白。存档里本来就该是干净的，但旧版本会把面板入口
+      // 要求的空行一起写进去（见 settleReservations），在这儿理掉，
+      // 末尾的空行才是我们自己按份数留的
+      const trimmed = content.trim()
+      this.initialDrafts[dateString] = trimmed
+      this.drafts[dateString] = this.padTrailingBlankLines(trimmed)
     },
-    // 正文末尾补足空行，已经够了就只补差额。空正文不动（没什么可隔开的）
-    padTrailingBlankLines(content) {
+    // 正文末尾补足空行，已经够了就只补差额。空正文不动（没什么可隔开的）。
+    // want 不传就是跟着面板的进入方式走；预定标记搬过去的目标日要另开一份，
+    // 不该跟着那个入口走——传 DEFAULT_BLANK_LINES
+    padTrailingBlankLines(content, want = this.appendBlankLines) {
       if (!content) return content
-      const want = Math.max(0, Math.trunc(this.appendBlankLines))
+      const count = Math.max(0, Math.trunc(want))
       const have = /(\n*)$/.exec(content)[1].length
-      return have >= want ? content : content + '\n'.repeat(want - have)
+      return have >= count ? content : content + '\n'.repeat(count - have)
     },
 
     // 追加一个附加科目小节：小标题独占一段，渲染层才认得出它是附加科目的作业。
@@ -689,7 +724,10 @@ this.$nextTick(() => {
       this.switchDate(next)
     },
     // 翻日期也是一种「离开」，先把正文里的预定标记落实掉，
-    // 不然跨页之后那些标记还留着，回头就找不着它原来管的那几行了
+    // 不然跨页之后那些标记还留着，回头就找不着它原来管的那几行了。
+    // 预定内容在这里就直接交回去写盘，不等完成编辑——它已经被搬到别的日子去了，
+    // 留在原地不动反而对不上。目标日的草稿也一起跟上（settleReservations 里写的），
+    // 完成编辑时会再存一遍同值，重复但不冲突
     async switchDate(dateString) {
       const moved = await this.settleReservations()
       if (moved.length) this.$emit('save', moved)
@@ -805,20 +843,17 @@ this.$nextTick(() => {
     // 完成编辑这一刻顺便把正文里的「预定」标记落实掉：标记行以下的内容
     // 搬到那一天去，标记行本身不留，被搬进去的那几天也要一并交回去写盘
     async handleClose() {
-      // 先落实预定：它会把正文里的标记行和被搬走的内容从正文里去掉。
+      // 先落实预定。它把搬走的内容直接写进目标日的草稿，所以下面
+      // changedDrafts 一次就把当天和所有目标日都算上了，不用再单独合并一遍。
       // 顺序反了的话 changedDrafts 拿到的还是没搬过的正文，标记行会被存回去
-      const moved = await this.settleReservations()
+      await this.settleReservations()
       const entries = this.changedDrafts()
-      for (const item of moved) {
-        const at = entries.findIndex((entry) => entry.dateString === item.dateString)
-        if (at >= 0) entries[at] = item
-        else entries.push(item)
-      }
       if (entries.length) this.$emit('save', entries)
       this.dialogVisible = false
     },
 // 把手工写的预定标记落实到各个日期上，返回被搬进去的日期和它们的新正文。
-    // 只在完成编辑和翻日期这一刻跑，展示和面板都不解析
+    // 只在完成编辑和翻日期这一刻跑：展示和预览都另有自己的一份解析（buildPreviewPayload），
+    // 不去动草稿，所以两者不会互相把对方算好的结果改掉
     async settleReservations() {
       const { blocks, rest } = parseReservations(this.content, this.todayString)
       if (!blocks.length) return []
@@ -834,32 +869,100 @@ this.$nextTick(() => {
       }
       const entries = []
       for (const [dateString, list] of byDate) {
-        const existing = (await this.readDayContent(dateString)).trim()
-        let dayLines = existing ? existing.split('\n') : []
-        // 同一天可能被预定好几块，按正文里的先后依次插进去，别打乱
-        for (const block of list) dayLines = spliceIntoDay(dayLines, block.heading, block.lines)
-        // 空行统一理一遍：开头不留、结尾留一个、不许连着空、每个 # 前面空一个
-        const content = this.padTrailingBlankLines(tidyBlankLines(dayLines.join('\n')))
+        // 空行统一理一遍：开头不留、结尾留一个、不许连着空、每个 # 前面空一个。
+        // 末尾按默认的一份留：appendBlankLines 管的是「这个面板怎么打开的」，
+        // 从「继续添加作业」进来要 2 个是为了在正文末尾另起一份，
+        // 跟往目标日追加一段没关系，跟着走就会凭空多出一个空行
+        const content = this.padTrailingBlankLines(
+          tidyBlankLines(assembleDayContent(await this.readDayContent(dateString), list)),
+          DEFAULT_BLANK_LINES
+        )
         // 草稿也得立刻跟上。少了这一步，这次编辑里再翻回那天，
         // loadContent 会因为 drafts 里已经有一份（旧的）就直接返回它，
         // 目标日期看到的还是搬过去之前的样子
         this.drafts[dateString] = content
-        entries.push({ dateString, content })
+        // 交回去写盘的去掉首尾空白，和 changedDrafts 同一个规矩。少了这一步，
+        // 这份带空行的正文会经 switchDate 直接进存档，以后打开那天看到的
+        // 末尾空行就比这里留的多
+        entries.push({ dateString, content: content.trim() })
       }
       return entries
     },
     // 那天已有的正文：这次编辑里翻到过就直接用草稿（别拿存档里旧的覆盖掉），
-    // 没翻到过才去读存档
+    // 没翻到过才去读存档。读过的存进 _baseCache 备着——预览要同步拿这份底稿来算拼装结果，
+    // 等不起 IndexedDB
     async readDayContent(dateString) {
       if (this.drafts[dateString] != null) return this.drafts[dateString]
-      let content = ''
+      if (this._baseCache[dateString] != null) return this._baseCache[dateString]
+      // 同一天已经在读了就等那一次，别重复打存档
+      if (!this._baseLoads[dateString]) {
+        this._baseLoads[dateString] = this.loadStoredDayContent(dateString).then((content) => {
+          this._baseCache[dateString] = content
+          delete this._baseLoads[dateString]
+          return content
+        })
+      }
+      return this._baseLoads[dateString]
+    },
+    async loadStoredDayContent(dateString) {
       try {
         const data = await dataProvider.loadData('classworks-data-' + dateString)
-        if (data && data.success !== false) content = data.homework?.[this.title]?.content || ''
+        if (data && data.success !== false) return data.homework?.[this.title]?.content || ''
       } catch (error) {
         console.error('读取预定日作业失败:', error)
       }
-      return content
+      return ''
+    },
+    // 同步取某一天的底稿：翻到过就用草稿，其次用读过的存档，都没有返回 null。
+    // null 的意思是「还不知道」，调用方自己决定是等一等还是先不算
+    peekDayContent(dateString) {
+      if (this.drafts[dateString] != null) return this.drafts[dateString]
+      const cached = this._baseCache[dateString]
+      return cached == null ? null : cached
+    },
+    // 给展示板的实时预览：日期 -> 正文。每一份都把预定标记解析掉，
+    // 搬走的内容拼到目标日那一节后面——和 settleReservations 用同一套拼法，
+    // 区别只是结果不落进草稿。所以展示板上看到的是「将会变成什么样」，
+    // 而不是已经存了什么
+    buildPreviewPayload() {
+      const payload = {}
+      // 标记可能来自任何一天，同一个目标日要把各处的块按正文里的先后并起来
+      const byDate = new Map()
+      for (const [dateString, draft] of Object.entries(this.drafts)) {
+        const { blocks, rest } = parseReservations(draft || '', this.todayString)
+        payload[dateString] = rest
+        for (const block of blocks) {
+          if (!byDate.has(block.dateString)) byDate.set(block.dateString, [])
+          byDate.get(block.dateString).push(block)
+        }
+      }
+      // 底稿还没读进缓存的目标日先欠着，等读完了再补发一次
+      const missing = []
+      for (const [dateString, list] of byDate) {
+        const base = this.peekDayContent(dateString)
+        if (base == null) {
+          missing.push(dateString)
+          continue
+        }
+        payload[dateString] = this.padTrailingBlankLines(
+          tidyBlankLines(assembleDayContent(base, list)),
+          DEFAULT_BLANK_LINES
+        )
+      }
+      return { payload, missing }
+    },
+    // 每敲一个字都推一次预览。目标日的存档还没读过时会晚一拍：
+    // 先补读，回来再重算一次
+    async pushPreview() {
+      const token = ++this._previewToken
+      let result = this.buildPreviewPayload()
+      if (result.missing.length) {
+        await Promise.all(result.missing.map((dateString) => this.readDayContent(dateString)))
+        // 读存档这几毫秒里正文可能又变了，交给新一轮预览，别拿过期结果盖掉它
+        if (token !== this._previewToken) return
+        result = this.buildPreviewPayload()
+      }
+      this.$emit('preview', result.payload)
     },
     // 改动过的日期：正文和读进来时不一致就算改过（首尾空白不算改动）
     changedDrafts() {

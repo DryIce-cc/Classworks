@@ -65,6 +65,7 @@
     :append-blank-lines="state.editAppendBlankLines"
     :extra-subjects="currentEditExtraSubjects"
     @save="handleHomeworkSave"
+    @preview="handleHomeworkPreview"
   />
 </template>
 
@@ -109,6 +110,10 @@ export default {
         // 展示板所看的这一天以外的每一天（后续日期预加载 + 面板里翻到过去的日子），
         // 按日期升序
         otherDays: [],
+        // 编辑面板开着时展示板看到的那份正文：日期 -> 科目 -> 正文。
+        // 只读不写盘——它和 boardData / otherDays 是两回事，那两个对象正是
+        // saveDayData 落盘的原样内容，预览混进去就跟着存下去了
+        preview: {},
       },
     }
   },
@@ -164,7 +169,16 @@ export default {
     // 展示板只呈现「所看的这一天 + 更晚的日子」。
     // 更早的日子只可能是编辑面板里翻回去改的：存了档，但不该在这块板上冒出来。
     laterDays() {
-      return this.state.otherDays.filter((day) => day.dateString > this.state.dateString)
+      const days = this.state.otherDays.slice()
+      // 预览刚到、那天还在读进 otherDays 的路上时，先自己补一条空的占住位置，
+      // 免得这一小段时间里展示板上少一段。内容随后由 handleHomeworkPreview 补上
+      for (const dateString of Object.keys(this.state.preview)) {
+        if (days.some((day) => day.dateString === dateString)) continue
+        days.push({ dateString, homework: {} })
+      }
+      return days
+        .filter((day) => day.dateString > this.state.dateString)
+        .sort((a, b) => a.dateString.localeCompare(b.dateString))
     },
     isToday() {
       const now = new Date()
@@ -172,6 +186,15 @@ export default {
       const mm = String(now.getMonth() + 1).padStart(2, '0')
       const dd = String(now.getDate()).padStart(2, '0')
       return this.state.dateString === `${yyyy}${mm}${dd}`
+    },
+  },
+
+  watch: {
+    // 面板一关，预览就没意义了：到这一步为止改动也已经写完盘了。
+    // 挂在这里而不是等 save 事件，是因为面板所有的关闭方式都走同一条路，
+    // 只有一个地方需要记得清场
+    'state.dialogVisible'(value) {
+      if (!value) this.state.preview = {}
     },
   },
 
@@ -253,10 +276,11 @@ export default {
       await this.loadOtherDays()
     },
 
-    // 仅当日视图把后面各天的作业一并读出来；查看历史/未来日期时不启用
+    // 当天和未来视图把更后面的作业一并读出来；查看过去日期时不启用——
+    // 那块板只呈现那一天自己，别把后来的作业混进去
     async loadOtherDays() {
       const todayStr = this.formatDate(this.getToday())
-      if (this.state.dateString !== todayStr) {
+      if (this.state.dateString < todayStr) {
         this.state.otherDays = []
         return
       }
@@ -268,7 +292,7 @@ export default {
         }
         const dates = res.keys
           .map((key) => /^classworks-data-(\d{8})$/.exec(key)?.[1])
-          .filter((ds) => ds && ds > todayStr)
+          .filter((ds) => ds && ds > this.state.dateString)
           .sort()
         const days = []
         for (const ds of dates) {
@@ -320,23 +344,41 @@ export default {
           if (data?.content?.trim()) names.add(key)
         }
       }
+      // 预览单算一遍：正在编辑的科目刚敲下第一个字，卡片区就该长出来，
+      // 那一天在存档里可能整个还不存在，collect 那边根本看不到它
+      for (const day of Object.values(this.state.preview)) {
+        for (const [key, content] of Object.entries(day)) {
+          if (content?.trim()) names.add(key)
+        }
+      }
       collect(this.state.boardData.homework)
       for (const day of this.laterDays) collect(day.homework)
       return names
+    },
+
+    // 某一天某个科目的预览正文。没有这一天的预览就返回 null，调用方据此回落到存档。
+    // 用 in 而不是真值判断：正文被删空时预览也是空串，那也得算数——
+    // 不然「删干净了」在展示板上根本看不出来
+    previewContent(dateString, subjectName) {
+      const day = this.state.preview[dateString]
+      if (!day || !(subjectName in day)) return null
+      return day[subjectName]
     },
 
     // 同一科目的作业分块：当日在前，后续日期按日期升序，分隔线由渲染层处理
     // 正文内部用空行分段、用「# 标题」分段，详见 HomeworkGrid 的解析
     buildSegments(subjectName) {
       const segments = []
-      const todayData = this.state.boardData.homework[subjectName]
-      if (todayData && todayData.content) {
-        segments.push({ label: null, content: todayData.content })
+      const own = this.previewContent(this.state.dateString, subjectName)
+      const currentContent = own != null ? own : this.state.boardData.homework[subjectName]?.content
+      if (currentContent) {
+        segments.push({ label: null, content: currentContent })
       }
       for (const day of this.laterDays) {
-        const data = day.homework?.[subjectName]
-        if (data && data.content) {
-          segments.push({ label: this.dayName(day.dateString), content: data.content })
+        const own = this.previewContent(day.dateString, subjectName)
+        const content = own != null ? own : day.homework?.[subjectName]?.content
+        if (content) {
+          segments.push({ label: this.dayName(day.dateString), content })
         }
       }
       return segments
@@ -386,6 +428,26 @@ export default {
       this.currentEditSubject = key
       this.state.editAppendBlankLines = options.appendBlankLines || 1
       this.state.dialogVisible = true
+    },
+
+    // 编辑面板开着时的实时预览：日期 -> 正文，只往 state.preview 里放。
+    // 绝不碰 boardData / otherDays，也绝不调 saveDayData——
+    // 这两样是真正会落盘的东西，预览混进去就不再是「只是展示」了
+    handleHomeworkPreview(entries) {
+      const key = this.currentEditSubject
+      if (!key) return
+      const preview = {}
+      for (const [dateString, content] of Object.entries(entries || {})) {
+        preview[dateString] = { [key]: content }
+      }
+      this.state.preview = preview
+      // 预定标记指向的那天常常在存档里还不存在，otherDays 里就没有它。
+      // 先读进来：不然完成编辑时 handleHomeworkSave 要现读，读的那几毫秒里
+      // 预览已经被清掉，展示板上这一段会闪一下才回来
+      for (const dateString of Object.keys(preview)) {
+        if (dateString === this.state.dateString) continue
+        this.ensureDayHomework(dateString)
+      }
     },
 
     // 一次编辑可能改到多天，按各自的日期写回各自的存档
