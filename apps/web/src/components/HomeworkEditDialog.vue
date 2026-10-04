@@ -226,7 +226,7 @@
                 </v-btn>
                 <!-- 这一行有内容时才值得换行：办完了这一条接着开下一条 -->
                 <v-btn
-                  class="keypad-btn"
+                  class="keypad-btn keypad-word"
                   size="small"
                   :variant="canEndLine ? 'flat' : 'tonal'"
                   :color="canEndLine ? 'primary' : undefined"
@@ -236,7 +236,7 @@
                   换行
                 </v-btn>
                 <v-btn
-                  class="keypad-btn"
+                  class="keypad-btn keypad-word"
                   size="small"
                   variant="tonal"
                   @mousedown.prevent
@@ -269,32 +269,31 @@
              不另记状态，所以光标落到空行上自动回到第一层。量词和介词不在面板上，
              在小键盘底下。面板只往正文里加字：不加空格也不改字 -->
         <div class="phrase-panel">
-<div
-                  v-for="(row, ri) in panel"
-                  :key="ri"
-                  class="phrase-row"
-                  :class="{ 'phrase-row-affix': row.prefix || row.suffix }"
+          <div
+            v-for="(row, ri) in panel"
+            :key="ri"
+            class="phrase-row"
+            :class="{ 'phrase-row-affix': row.prefix || row.suffix }"
+          >
+            <!-- 「作为」「的作业」是固定文字，不是按钮 -->
+            <span v-if="row.prefix" class="phrase-affix phrase-affix-prefix">{{ row.prefix }}</span>
+            <div class="phrase-chips">
+              <div v-for="(group, gi) in row.groups" :key="gi" class="phrase-group">
+                <v-chip
+                  v-for="chip in group"
+                  :key="chipLabel(chip)"
+                  class="ma-1 phrase-chip"
+                  :variant="chipVariant(row, chip)"
+                  :class="{ 'phrase-chip-on': isChipLit(row, chip) }"
+                  @mousedown.prevent
+                  @click="tapChip(chip, row)"
                 >
-                  <!-- 「作为」「的作业」是固定文字，不是按钮 -->
-                  <span v-if="row.prefix" class="phrase-affix">{{ row.prefix }}</span>
-                  <div class="phrase-chips">
-                    <div v-for="(group, gi) in row.groups" :key="gi" class="phrase-group">
-                      <v-chip
-                        v-for="chip in group"
-                        :key="chipLabel(chip)"
-                        class="ma-1 phrase-chip"
-                        :variant="chipVariant(row, chip)"
-                        :class="{ 'phrase-chip-on': isChipLit(row, chip) }"
-                        @mousedown.prevent
-                        @click="tapChip(chip, row)"
-                      >
-                        {{ chipLabel(chip) }}
-                      </v-chip>
-                    </div>
-                  </div>
-<span v-if="row.suffix" class="phrase-affix">{{ row.suffix }}</span>
-                </div>
-<div class="sel-debug">{{ selDebug }}</div>
+                  {{ chipLabel(chip) }}
+                </v-chip>
+              </div>
+            </div>
+            <span v-if="row.suffix" class="phrase-affix phrase-affix-suffix">{{ row.suffix }}</span>
+          </div>
         </div>
       </v-card-text>
     </v-card>
@@ -306,7 +305,6 @@ import dataProvider from '@/utils/dataProvider'
 import { formatDayName, parseDateString, shiftDateString, toDateString } from '@/utils/date'
 import {
   BOTTOM_KEYS,
-  chipLabel,
   contextKeys,
   findDayBlockEnd,
   commonDayInSelection,
@@ -315,6 +313,7 @@ import {
   selectionHeadings,
   spliceIntoDay,
   headingAbove,
+  ownerAt,
   headingAboveStart,
   headingBlockSize,
   headingTitleStart,
@@ -422,8 +421,6 @@ export default {
       // 放在 data 里跟着 updateCurrentLine 一起更新——computed 里读
       // selectionStart 既不响应又可能炸，面板得靠它知道自己是不是在改整块
       selectedRange: null,
-      // 【临时诊断】分派时的异常，定位完删掉
-      chooseDayError: '',
       // 焦点在不在输入框里。不在的话小键盘一律不高亮
       inputFocused: false,
       pickerOpen: false,
@@ -533,24 +530,6 @@ export default {
         selection,
       )
     },
-    // 【临时诊断】看清多选到底读到了什么、走的是哪条分支。定位完请让我删掉
-    selDebug() {
-      const r = this.selectedRange
-      const heads = r ? selectionHeadings(this.content, r.start, r.end) : []
-      const owner = r ? headingAbove(this.content, r.start) : ''
-      const picked = r ? this.content.slice(r.start, r.end).replace(/\n/g, '⏎') : ''
-      return [
-        `选区[${r ? r.start : '-'},${r ? r.end : '-'})`,
-        `全长${this.content.length}`,
-        `含#行${heads.length}`,
-        `作用域${owner || '无'}`,
-        `选中=「${picked}」`,
-        `亮=${this.selectionDay || '无'}`,
-        this.chooseDayError ? `出错=${this.chooseDayError}` : '',
-      ]
-        .filter(Boolean)
-        .join(' ')
-    },
     // 选区里那些标题解出来的是同一天就返回那天，不是就返回空串
     selectionDay() {
       if (!this.selectedRange) return ''
@@ -575,6 +554,12 @@ export default {
     keyHints() {
       if (!this.inputFocused) return { suffix: false }
       return hints(this.textBeforeCaret)
+    },
+    // 量词那一排（页 张 题 课 章）该不该出现：光标前面紧挨着一个阿拉伯数字就该出现。
+    // 放 computed 不放 methods：模板里 v-if 写的是 showBottomKeys（不加括号），
+    // 拿 methods 的话模板取到的是那个函数本身，永远为真，这一排就从来不隐藏
+    showBottomKeys() {
+      return this.inputFocused && this.keyHints.suffix
     },
     // 光标在这一行里的位置。放在 data 里跟着 updateCurrentLine 一起更新，
     // 不在 computed 里摸 DOM——渲染期读 selectionStart 既不响应，又可能炸掉整个面板
@@ -620,10 +605,6 @@ this.$nextTick(() => {
     },
   },
   methods: {
-    // 光标刚好敲完一个数字才需要量词。数字区不再高亮，这排改成就出现/就收起来
-    showBottomKeys() {
-      return this.inputFocused && this.keyHints.suffix
-    },
     // 顶部倒计条：走满 5s 就自动关掉。倒计只从打开那一刻起算，
     // 面板里任何一点动静都会把它撤掉，此后不再自动关。
     // 条走完靠 CSS 动画，和这里的定时器同时起步，不会出现条没走完就关。
@@ -1050,11 +1031,10 @@ this.$nextTick(() => {
       const nl = content.indexOf('\n', at)
       return nl < 0 ? content.length : nl
     },
-    // 按钮上显示的字。收尾建议里那几个带「，」的，逗号只是插进正文时
-    // 跟前面内容隔开用的，按钮上不显示
+    // 按钮上显示的字。日期按钮是 { word, date }，别的按钮就是直接一个词，
+    // 词上不带标点——收尾建议那几个词前面的逗号由那一行的 comma 标记现补
     chipLabel(chip) {
-      // 日期按钮是 { word, date }，别的按钮就是直接一个词
-      return typeof chip === 'string' ? chipLabel(chip) : chip.word
+      return typeof chip === 'string' ? chip : chip.word
     },
     // 该亮的按钮垫一层，当选中。不是强调色——拿主题的文字色垫一层，深浅色都跟得住。
     // 光靠 variant="flat" 不够：浅色主题下那层底色几乎看不出来
@@ -1090,17 +1070,6 @@ this.$nextTick(() => {
     // 走 3、4 之前都先找「那天已经有的那一节」并进去，别再开一个同名的。
     // 这一行本来就归那一天的话，mergeLinesInto 会挡下来，这里等于什么都不做
     chooseDay(day, date) {
-      try {
-        this.runChooseDay(day, date)
-      } catch (error) {
-        // 【临时诊断】之前有一次参数名错位，方法体一进去就抛 ReferenceError，
-        // 点按钮「毫无反应」、控制台一条红字。这里把异常显示出来，别再猜
-        this.chooseDayError = (error && error.message) || String(error)
-      }
-    },
-    // 【临时诊断】真正跑分派的那个。异常不从这里抛出去，chooseDay 兜着
-    runChooseDay(day, date) {
-      this.chooseDayError = ''
       const textarea = this.getTextarea()
       if (!textarea) return
       const strip = date === this.currentDate
@@ -1151,8 +1120,8 @@ applySelectedDay(word, strip) {
       const range = this.selectedRange
       if (!range) return
       const before = this.content
-      // 选区跨了几段就一段一段改；只落在一节里的时候，先试并进那天已有的那一节
-      const owner = headingAbove(before, range.start)
+      // 选区跨了几段就一段一段改；先试并进那天已有的同名那一节
+      const owner = ownerAt(before, range.start)
       const target = resolveReserveDay(word, this.todayString)
       // 这一片本来就归那一天：什么都不做。不挡的话拼回一样的字符串会被当成
       // 「没改动」，掉进兜底白白复制出一个同名的小标题
@@ -1160,10 +1129,22 @@ applySelectedDay(word, strip) {
         const ownerDate = resolveReserveDay(parseReserveLine(owner)?.word, this.todayString)
         if (ownerDate === target) return
       }
-      let result = null
-      if (strip && owner) {
-        result = mergeLinesInto(before, range.start, range.end, this.todayString, this.currentDate, true)
-      }
+      // 选区跨了好几节就别整块往一处并了——那是一段一段的事，交给下面那个。
+      // 只有「就在一节里」才并：整节搬走并进那天同名的某一节，
+      // 或者点编辑日时并进上面那个没有小标题的正文块
+      const oneSection = selectionHeadings(before, range.start, range.end).every(
+        (at) => at === range.start,
+      )
+      let result = oneSection
+        ? mergeLinesInto(
+            before,
+            range.start,
+            range.end,
+            this.todayString,
+            target || this.currentDate,
+            strip,
+          )
+        : null
       if (!result) result = applyDayToSelection(before, range.start, range.end, word, strip)
       if (!result || result.text === before) return
       this.content = result.text
@@ -1267,6 +1248,11 @@ applySelectedDay(word, strip) {
 // 「# 通知」这种普通标题跟过去就是多一份一模一样的标题，还是用「xx的作业」
       const heading = (owner && retargetHeading(owner, day)) || reserveLine(day)
 
+      // 空行统一交给 tidyBlankLines 理：开头不留、结尾留一个、不许连着空、
+      // 每个 # 前面空一个。手工写的标题行也一并按这个理。
+      // 先理再算插入点：理完偏移才是准的。反过来算的话，原文里那几个多出来的
+      // 空行一被收掉，位置全往前挪，光标就落到文末去了
+      rest = tidyBlankLines(rest)
       const blockEnd = findDayBlockEnd(rest, day)
       let text = ''
       let caret = 0
@@ -1286,14 +1272,14 @@ applySelectedDay(word, strip) {
         text = head + heading + '\n' + line
         caret = text.length
       }
-      // 空行统一交给 tidyBlankLines 理：开头不留、结尾留一个、不许连着空、
-      // 每个 # 前面空一个。手工写的标题行也一并按这个理
+      // 已经理过一遍了，这里再理一次是白理——但插入本身可能造出新的空行
+      // （比如新标题前面那一个），留着这一步兜底
       text = tidyBlankLines(text)
       this.content = text
       this.$nextTick(() => this.restoreLineCaret(caret))
     },
     // 往光标处写一个按钮上的字。按钮上的字用户已经自己敲过一半时，只补剩下那几个
-    // （已经打了「明天」再点「明天交」，就只补一个「交」），
+    // （已经打了「明天」再点「明天上课对答案」，就只补一个「上课对答案」），
     // 这种接着写完的情况前面不用再补逗号——不是在起一个新词
     insertWord(word, row) {
       const textarea = this.getTextarea()
@@ -1308,11 +1294,12 @@ applySelectedDay(word, strip) {
       const at = row?.endsLine ? this.currentLineEnd : textarea.selectionStart
       const typed = this.typedPrefix(this.content.slice(this.currentLineStart, at), word)
       const rest = typed ? word.slice(typed.length) : word
-      // 前面已经有内容才补逗号；已经有逗号、或者这次只是接着写完，都不补
+      // comma 那一排（收尾建议）是在已有内容后面接一句，所以先补一个逗号隔开。
+      // 用户自己已经打了逗号、或者已经在接着写这个词，就只补剩下的，不再来一个逗号；
+      // 逗号前面是换行（光标在这一行最开头）也不补，不然那一行会以逗号开头
       const tail = at > 0 ? this.content[at - 1] : ''
-      const comma = '，'
-      const needsComma = !!row?.endsLine && !typed && !!tail && tail !== comma && tail !== ','
-      const insert = (needsComma ? comma : '') + rest + (row?.endsLine ? '\n' : '')
+      const needsComma = !!row?.comma && !typed && !!tail && !/^[,，\n]$/.test(tail)
+      const insert = (needsComma ? '，' : '') + rest + (row?.endsLine ? '\n' : '')
       // 自动换行是替用户做了一件事，说一声，不然光标莫名其妙跳到下一行
       if (row?.endsLine) this.$message.success('已换行', '这一条收尾了，接着写下一条')
       // 收尾那一排要写到行尾，不是光标处。挪光标会打断浏览器的撤销分组，
@@ -1623,31 +1610,52 @@ applySelectedDay(word, strip) {
   opacity: 0.7;
 }
 
+/* 前缀（「作为」）要和上面两行的按钮左对齐。按钮那个字的起点是 ma-1 的
+   4px 外边距加 chip 默认档左右各 12px 的内边距，这里让出同样的一截 */
+.phrase-affix-prefix {
+  margin-left: 4px;
+  padding-left: 12px;
+}
+
 /* 组与组之间只留一点空隙。不用竖线，竖线既丑又抢眼 */
 :deep(.v-chip) {
   cursor: pointer;
   user-select: none;
 }
 
-/* 小键盘整列：每一行都是同一个三列网格，按钮尺寸只由网格决定。
-   之前换行/空格那两个键上写了 width:100%，把 flex:1 盖掉了，同一行里
-   三个键就三个宽度——现在没有按钮再自带宽度，加减按钮也不会跑偏 */
+/* 键位之间的间距，横竖一律用这一个值：行与行靠 .numeric-keypad 的 gap，
+   一行之内靠各网格自己的 gap，两者都取它，不会一处宽一处窄 */
 .quick-tools {
+  --key-gap: 4px;
   border-left: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
+.numeric-keypad {
+  display: flex;
+  flex-direction: column;
+  gap: var(--key-gap);
+}
+
+/* 小键盘整列：每一行都是同一个三列网格，按钮尺寸只由网格决定。
+   之前换行/空格那两个键上写了 width:100%，把 flex:1 盖掉了，同一行里
+   三个键就三个宽度——现在没有按钮再自带宽度，加减按钮也不会跑偏 */
 .keypad-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
+  gap: var(--key-gap);
 }
 
 .keypad-btn {
   width: 100%;
   min-width: 0;
+}
+
+/* 换行、空格：两个汉字挤在数字键那么宽的一格里，字号比数字键小一号才匀。
+   size="small" 本来就是 0.75rem，这里写死是免得改尺寸时跟着一起变 */
+.keypad-word {
+  font-size: 0.75rem;
 }
 
 /* 这一格这次不给东西（比如刚敲完 p、接下来该敲数字）。
@@ -1657,31 +1665,22 @@ applySelectedDay(word, strip) {
 }
 
 /* 量词那一排。自己一行、均分整行，不跟上面那个三列网格对齐——
-   四个键本来也对不上三列，硬凑只会让键宽一会儿宽一会儿窄 */
+   五个键本来也对不上三列，硬凑只会让键宽一会儿宽一会儿窄 */
 .measure-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--key-gap);
 }
 
+/* 量词上的字跟自动建议区的 chip 一样大（chip 默认档是 0.875rem，
+   v-btn 按 size="small" 把它压到 0.75rem，这里改回来，两个区域看齐）。
+   五个键分那一百八十来 px，一格三十几，v-btn 默认左右各 12px 的内边距
+   会把字挤出去，所以一并收窄 */
 .measure-btn {
   width: 100%;
   min-width: 0;
-}
-
-/* 【临时诊断】看清多选读到了什么、走哪条分支，定位完删掉 */
-.sel-debug {
-  padding: 2px 8px;
-  font-size: 11px;
-  line-height: 1.4;
-  opacity: 0.75;
-  word-break: break-all;
-}
-
-/* 当前目标日期那个按钮的选中态。不用强调色：拿主题的文字色垫一层，
-   深色浅色都跟得住。--v-theme-on-surface 是「文字色」这个 RGB 三元组，
-   Vuetify 每个主题都有定义 */
-.phrase-chip-on {
-  background-color: rgba(var(--v-theme-on-surface), 0.14);
+  padding: 0 2px;
+  font-size: 0.875rem;
 }
 </style>
+

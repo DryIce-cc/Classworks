@@ -2,10 +2,12 @@
 //
 // 面板分三层，一次只显示当前这一层：
 //
-//   起手层  订正 / 卷（卷子、周末卷）/ 本（小白、作业册、练习册、课本）。
+//   起手层  订正 / 卷（卷子、练习卷、周末卷）/ 本（小白、作业册、练习册、课本）。
 //           按下「订正」不换层，只把第一行换成默写那一堆，下面两行原样不动。
+//           这一行只剩「完成」「完成好」这类收尾的话也停在这一层：这条齐了，
+//           接着写下一条（见 onlyDone）。
 //   自动建议的最后一层  只要这一行有汉字或字母就来，而且不区分是卷是本还是默写：
-//           第一行正反面、单元测试，第二行什么时候交，第三行预定。固定四行，
+//           第一行正反面，第二行怎么收尾，第三行预定。固定四行，
 //           高度不变，写字的时候编辑框不会被顶得上下跳。
 //   小标题层  光标停在 # 开头那一行上，只有「作为…的作业」那一栏，
 //           点一下改的是这个标题的目标日期。
@@ -22,56 +24,54 @@
 
 import { formatDayName, parseDateString, shiftDateString } from './date'
 
-// 任务：点完还有的下一步，所以和载体分开摆一行
+// 任务：点完还有的下一步，所以和载体分开摆一行。
+// 「完成」不在这里：写完了这一条，面板自己认（见 onlyDone），不用再给一个按钮
 export const TASKS = ['订正']
 
 // 订正按下后第一行换成这一堆
-export const RECITE = ['默写', '课前默写', '早读默写']
+export const RECITE = ['默写', '早读默写', '课前默写']
 
 // 卷：内容里有正反面
-export const PAPERS = ['卷子', '周末卷']
+export const PAPERS = ['卷子', '练习卷', '周末卷']
 
-// 本：内容里有单元测试
+// 本：内容里写页码或者范围
 export const BOOKS = ['小白', '作业册', '练习册', '课本']
 
 // 小键盘底下那排量词。刚敲完一个数字才需要它们，平时收起来
-export const BOTTOM_KEYS = ['课', '题', '章', '张']
+export const BOTTOM_KEYS = ['页', '张', '题', '课', '章']
 
 // 自动建议最后一页的第一行。卷和本各自能补的东西不一样，但既然不区分了，
 // 就一次全摆出来，省得先认一遍是哪种再决定按哪个
-const CONTENT_ROW = ['正面', '反面', '单元测试']
+const CONTENT_ROW = ['正面', '反面']
 
 // 收尾建议：这一行已经写了正经内容，就可以建议怎么结尾了。
-// 开头带逗号的那些，按钮上不显示逗号——那是插进正文时跟前面内容隔开用的
-export const SUGGEST_WORDS = ['写完', '不交', '，明天交', '，明天上课对答案', '，核对群里或板报的答案']
+// 词上不带逗号：逗号由这一行的 comma 标记来补（见 panelRows 与 insertWord）
+export const SUGGEST_WORDS = ['自行完成', '明天上课对答案', '核对群里或板报的答案']
 
-// 中文标点不算内容，「订正，默写」和「订正默写」要一样看待
-const CHINESE_PUNCT = /[　-〿＀-￯]/gu
-// 汉字和字母
-const CONTENT_CHAR = /[\p{Script=Han}a-zA-Z]/u
-// 就这两个词说明白「完成了」，不用再建议怎么收尾
-const DONE_WORDS = ['完成', '完成好']
-
-// 这一行值不值得给收尾建议：有汉字或字母，而且不只是「完成」「完成好」
-export function shouldSuggest(line) {
-  const words = line.replace(CHINESE_PUNCT, '').trim()
-  if (!CONTENT_CHAR.test(words)) return false
-  return !DONE_WORDS.includes(words)
+// 这一行剩下的中英文字：数字、标点、空格、前后缀全摘掉。
+// 中文标点不算内容，「订正，默写」和「订正默写」要一样看待；
+// 「1. 完成」摘完是「完成」，面板看来它和光打一个「完成」是同一件事；
+// 「小蓝p30~35」摘完是「小蓝p」
+function lettersOnly(line) {
+  return line.replace(/[^\p{Script=Han}a-zA-Z]/gu, '')
 }
 
-// 按钮上显示的字：插进正文时开头那个逗号不显示
-export function chipLabel(chip) {
-  return typeof chip === 'string' ? chip.replace(/^，/, '') : chip
+// 除了「完成」这类收尾的话，这一行没有别的中英文字了（「1. 完成」也算）。
+// 这时面板回起手那一层：这一条齐了，接着写下一条（订正 / 卷 / 本）
+const DONE_ONLY = ['完成', '完成好']
+export function onlyDone(line) {
+  return DONE_ONLY.includes(lettersOnly(line))
 }
 
-// 小键盘上那两个格子，按光标前面停在哪动态换内容。空串表示这一次不给东西：
+// 小键盘上那两个格子，按光标前面停在哪动态换内容。空串表示这一次不给东西，
+// 那一个格子就空着（渲染层用 visibility 留着位置）：
 //   小白               → P  第   该起头了，两个前缀都能用
 //   p / 第 / 13~ / 13- → 空  空   前缀或者连接符刚敲出来，接下来该敲数字，别再催
 //   29                 → ~  .    光秃秃一个数字，多半是接着补范围
 //   p29                → ~  第   页码到头了，补范围或者改成第几题
 //   p13 15 / p13 15 17 → ~  第   多页接着往下写，收尾或者改成第几题
-//   第29               → ~  空   题号到头了，补范围或者换一句
-//   p13~15 / p13-15    → ，  第   区间写完了，另起一句或者改成第几题
+//   第29               → ~  .    题号到头了，补范围或者改写成第几页
+//   p13~15 / p13-15    → 空  第   区间写完了，该说它是第几题
 // 末尾的空格先忽略掉，「p13-15 」和「p13-15」要给出同一组
 export function contextKeys(before) {
   const text = before.replace(/[ 　]+$/, '')
@@ -82,31 +82,22 @@ export function contextKeys(before) {
   const digits = /(\d+)$/.exec(text)
   if (!digits) return ['P', '第']
   const head = text.slice(0, text.length - digits[1].length)
-  if (/第$/.test(head)) return ['~', '']
+  if (/第$/.test(head)) return ['~', '.']
   if (/[pP]$/.test(head)) return ['~', '第']
   // p13~15、p13-15：区间已经写完了
-  if (/[~-]$/.test(head)) return ['，', '第']
+  if (/[~-]$/.test(head)) return ['', '第']
   // p13 15、p13 15 17：数字前面是空格、而空格前面也是数字，多页接着写
   if (/\d$/.test(head.replace(/[ 　]+$/, ''))) return ['~', '第']
   return ['~', '.']
 }
 
-// 量词那一排该不该出现。
-//   13  13~25  第13   → 出现，这是题号/页数，该说它是几课几题
-//   p13  P29          → 不出现，这是页码，页码后面不跟量词
-//   p13 15-17 25~29   → 不出现。往前捋掉所有数字、连接符和空格，最后剩 p
-//   29  13▁           → 不出现。数字后面跟着空格就是接着写别的了
-function showMeasures(before) {
-  if (!/\d$/.test(before)) return false
-  const head = before.replace(/[\d\-~ 　\t]*$/, '')
-  const last = head.slice(-1)
-  return last !== 'p' && last !== 'P'
-}
-
 // 光标前面那几个字决定该亮什么。全靠正文判断，不记「上次按了什么」——
-// 状态机和正文会对不上，粘贴、手敲、改中间的字之后就不准了
+// 状态机和正文会对不上，粘贴、手敲、改中间的字之后就不准了。
+// 量词那一排（suffix）只看紧挨着光标的那一个字：是个阿拉伯数字就该出现。
+// 「13」「13~25」「第13」「p29」都算——页码后面也跟量词（页、题），
+// 所以不再往前捋着排除 p/P。全角数字不算
 export function hints(before) {
-  return { suffix: showMeasures(before) }
+  return { suffix: /\d$/.test(before) }
 }
 
 const has = (line, words) => words.some((word) => line.includes(word))
@@ -136,18 +127,22 @@ export function recitePending(line) {
 // 这一行有没有真内容：有汉字或者字母就算，标点、数字都不算。
 // 「小蓝p30~35」「完成小蓝」「mq」都算——词库认不认得先不管，有内容就能给建议
 export function hasContent(line) {
-  return CONTENT_CHAR.test(line)
+  return lettersOnly(line) !== ''
 }
 
 // 面板三层，认不出来的时候给回起手那一层：那时候摊一屏用不上的按钮只会干扰他。
-//   'pick'    起手那一层：订正 / 卷 / 本
-//   'autoLast' 自动建议的最后一层：正反面、什么时候交、预定
+//   'pick'    起手那一层（首页）：订正 / 卷 / 本
+//   'autoLast' 自动建议的最后一层：正反面、怎么收尾、预定
 //   'hash'    小标题那一层：光标停在 # 标题行上，只有日期那一栏
 export function phaseOf(line) {
   // 标题行单独一层：面板要改的不是正文，是这个标题的目标日期
   if (isHeadingLine(line)) return 'hash'
   // 空行、只有标点的行：没什么可建议的，回起手那一层
   if (!hasContent(line)) return 'pick'
+  // 整行就写了「完成」：这一条齐了，回首页去接着写下一条。
+  // 只写了完成、没写别的才这么办——「完成小白」「订正默写完成」都还在最后一页，
+  // 那边的正反面、收尾建议和预定照旧给
+  if (onlyDone(line)) return 'pick'
   // 「订正」刚落下、还没说是默写还是哪本，得留在起手那一层，
   // 不然默写那几个按钮就没处摆了
   if (recitePending(line)) return 'pick'
@@ -178,6 +173,14 @@ export function headingAbove(content, pos) {
   if (start < 0) return ''
   const end = content.indexOf('\n', start)
   return content.slice(start, end < 0 ? content.length : end)
+}
+
+// 这一片正文归哪个小标题管着。落点正好在小标题那一行上时就是它自己——
+// headingAbove 只管严格往上找，落在标题上会当成「上面没有」
+export function ownerAt(content, pos) {
+  const end = content.indexOf('\n', pos)
+  const line = content.slice(pos, end < 0 ? content.length : end)
+  return isHeadingLine(line) ? line : headingAbove(content, pos)
 }
 
 // 标题名（「# 明天的通知」里的「通知」）从第几个字开始。
@@ -300,9 +303,13 @@ export function panelRows(line, today, scope, currentDate, selection) {
   // 最后一页统一给这几栏，不再分书/卷/默写——认得出是哪种反而让同一件事
   // 在不同行上长得不一样，按之前还得先想一遍这是哪一类
   return [
+    // 最后一页的第一行永远是正反面：不管这一行是订正、默写还是写着「完成」，
+    // 都还能接着补内容
     { groups: [CONTENT_ROW] },
-    // 已经写了正经内容才给收尾建议，否则这一行空着
-    shouldSuggest(line) ? { groups: [SUGGEST_WORDS] } : { groups: [] },
+    // 有内容才给收尾建议。comma：这一排是接在已有内容后面的话，按下去先补
+    // 一个逗号再写词；用户自己已经打了逗号、或者已经在接着写这个词，
+    // 就只补剩下的（见 insertWord）
+    hasContent(line) ? { groups: [SUGGEST_WORDS], comma: true } : { groups: [] },
     reserveRow(today, currentDate, scope),
     { groups: [] },
   ]
@@ -522,8 +529,9 @@ export function applyDayToSelection(content, start, end, word, strip) {
     const ownHead = title ? `#${title}` : ''
     // 段前就是一个小标题（段前不是标题行，或者压根没有段前）
     const skipHead = !block.headed && block.begin > 0 && isHeadingLine(lines[block.begin - 1])
-    // 光秃秃的段落要点别的天，新起一节；标题也用作用域名，别一律叫「作业」
-    const section = ['', `#${word}的${title || '作业'}`, ...body]
+    // 光秃秃的段落要点别的天，新起一节；标题也用作用域名，别一律叫「作业」。
+    // 选区只框挪走的那几行，不框新加的那个标题
+    const sectionHead = ['', `#${word}的${title || '作业'}`]
     // 光秃秃的段落正好是紧贴在上面那个标题底下的（段前就是那个标题），
     // 后面又没有别的行了 → 整节一起搬走，直接改那个标题就行，不必新起一节
     const wholeSection =
@@ -564,19 +572,24 @@ export function applyDayToSelection(content, start, end, word, strip) {
       const next = retargetDayHeading(head, word, false)
       if (next !== head) touched = true
       push(next === head ? body : [next, ...body], next !== head)
-    } else if (tail.length && ownHead && ownHead !== (scopeAbove || '').trim()) {
-      push(section, true)
+    } else if (skipHead) {
+      // 原来那个标题留着——它还管着后面那几行，用户没选它就不动它。
+      // 新起的这一节插在它前面，尾部那几行跟着原标题走
+      push(sectionHead, false)
+      push(body, true)
       touched = true
-      push(['', ownHead, ...tail], false)
+      if (tail.length) push(['', lines[block.begin - 1], ...tail], false)
     } else if (out.some((line) => line.trim() !== '')) {
-      // 上面还有东西：把尾部提到新标题前面去，它归前面那节管
+      // 段前面还有别的内容：把尾部提到新标题前面去，它归原来那节管
       push(tail, false)
-      push(section, true)
+      push(sectionHead, false)
+      push(body, true)
       touched = true
     } else {
       // 提不动（选区就在文首），留在原处、用空行隔开，
       // 不然新标题插在中间会把尾部一起收进来
-      push(section, true)
+      push(sectionHead, false)
+      push(body, true)
       touched = true
       push(['', ...tail], false)
     }
@@ -626,21 +639,32 @@ export function mergeLinesInto(content, start, end, today, target, allowPlain) {
 
   // 这一行本来就归那一天了，没什么可并的。不先挡一下的话，它会被并进
   // 自己所在的那一节——位置上就是跟隔壁的行换了个位置，看着像什么都没发生
-  const owner = headingAbove(content, start)
+  const owner = ownerAt(content, start)
   if (owner && resolveReserveDay(parseReserveLine(owner)?.word, today) === target) return null
 
-  const picked = lines.slice(first, last + 1)
+  // 选区第一行自己就是小标题的话，这一整节都是要挪走的，标题不带过去——
+  // 目标就是同名的那一节，再留一个标题就变成两份一样的了
+  let picked = lines.slice(first, last + 1)
+  if (isHeadingLine(picked[0])) picked = picked.slice(1)
+  // 光剩一个标题：没什么可搬的，交给调用方去改那个标题
+  if (!picked.length) return null
   let rest = [...lines.slice(0, first), ...lines.slice(last + 1)]
 
-  // 原来那节被摘空了？空标题删掉。留着它展示板上就是一个没有内容的小标题
-  const above = first > 0 ? rest[first - 1] : ''
-  const below = rest[first] ?? ''
-  const emptied =
-    isHeadingLine(above) &&
-    (below.trim() === '' || isHeadingLine(below) || first >= rest.length)
-  if (emptied) rest = [...rest.slice(0, first - 1), ...rest.slice(first)]
+  // 原来那节被摘空了？空标题删掉。留着它展示板上就是一个没有内容的小标题。
+  // 选区本来就从标题起头的（整节搬走）不算这一种——它上面那一行是别人家的正文
+  if (!isHeadingLine(lines[first])) {
+    const above = first > 0 ? rest[first - 1] : ''
+    const below = rest[first] ?? ''
+    const emptied =
+      isHeadingLine(above) &&
+      (below.trim() === '' || isHeadingLine(below) || first >= rest.length)
+    if (emptied) rest = [...rest.slice(0, first - 1), ...rest.slice(first)]
+  }
 
-  const at = findMergePoint(rest, today, target, allowPlain)
+  // 原来那节的名字。光秃秃的正文没有名字，落到某一天时归那天的「的作业」管，
+  // 所以这里给个「作业」，别因为没有名字就谁也匹配不上
+  const from = owner ? scopeTitle(owner) : '作业'
+  const at = findMergePoint(rest, today, target, allowPlain, from)
   if (at < 0) return null
   const out = [...rest.slice(0, at), ...picked, ...rest.slice(at)]
   return {
@@ -662,11 +686,14 @@ function sectionEndFrom(lines, headingIndex) {
 // 不用挂标记，并进上面那个没有小标题的正文块就是了。
 // 点别的日子时不找这种地方——那天还没有对应的一节，说明该复制标题另起一节，
 // 不能把这一行塞进旁边不相干的正文块里
-function findMergePoint(lines, today, target, allowPlain) {
+// from 是原来那一节的节名：只并进同名的那一节。#后天的通告跟#明天的2 不是一码事，
+// 塞进去等于把这几行挂错了标题，宁可新起一节
+function findMergePoint(lines, today, target, allowPlain, from) {
   const isTargetDay = (line) => {
     if (!isHeadingLine(line)) return false
     const parsed = parseReserveLine(line)
-    return !!parsed && resolveReserveDay(parsed.word, today) === target
+    if (!parsed || resolveReserveDay(parsed.word, today) !== target) return false
+    return scopeTitle(line) === from
   }
   // 1. 向上最后一个日期正好的
   for (let index = lines.length - 1; index >= 0; index--) {
@@ -888,6 +915,10 @@ export function parseReservations(content, today) {
       moved.push(line)
       index++
     }
+    // 搬走的那几行后面紧跟着的空行也吃掉。标记行和内容都没了，这个空行就是
+    // 凭空多出来的一节空白——rest 是直接拿去当那天正文的（不再过一遍 tidy），
+    // 前后都还有内容的时候尤其明显
+    if (index < lines.length && lines[index].trim() === '') index++
     blocks.push({ dateString, lines: moved, heading: parsed.heading })
   }
   return { blocks, rest: rest.join('\n') }
