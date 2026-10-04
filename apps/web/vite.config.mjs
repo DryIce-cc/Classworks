@@ -34,6 +34,9 @@ export default defineConfig({
       lang: 'zh-CN',
       injectRegister: 'auto',
       strategies: 'generateSW',
+      // sw.js 本身不要走 HTTP 缓存。默认的 'imports' 会让浏览器最长 24 小时
+      // 直接拿缓存里的 sw.js 比对，新构建出来的改动半天都推不到浏览器上
+      updateViaCache: 'none',
 
       workbox: {
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,

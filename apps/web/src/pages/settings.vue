@@ -27,8 +27,6 @@
       <v-tabs-window v-model="settingsTab" direction="vertical" style="width: 100%">
         <v-tabs-window-item value="subject">
           <subject-management-card border />
-          <br />
-          <homework-template-card border />
         </v-tabs-window-item>
 
         <v-tabs-window-item value="developer">
@@ -49,14 +47,12 @@
 </template>
 
 <script>
-import HomeworkTemplateCard from '@/components/settings/cards/HomeworkTemplateCard.vue'
 import SubjectManagementCard from '@/components/settings/cards/SubjectManagementCard.vue'
 import SettingsExplorer from '@/components/settings/SettingsExplorer.vue'
 
 export default {
   name: 'Settings',
   components: {
-    HomeworkTemplateCard,
     SubjectManagementCard,
     SettingsExplorer,
   },

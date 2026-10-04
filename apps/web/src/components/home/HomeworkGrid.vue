@@ -75,6 +75,10 @@
 const MAX_COLUMNS = 3
 // 「点击添加作业」卡片露在视野里又没人理，3s 后就把它上滑出去
 const IDLE_SCROLL_DELAY = 3000
+// 小标题行：# 开头，后面最多一个空格（可有可无）。
+// 多个空格就不算小标题，当普通正文渲染——与其把多余的空格留在标题里，
+// 不如老老实实当它不是标题
+const HEADING_PATTERN = /^#([ 　]?)([^ 　].*)$/
 
 export default {
   name: 'HomeworkGrid',
@@ -286,7 +290,7 @@ export default {
       }
       return blocks
     },
-    // 正文按空行分段：一行空行即分割线，连续空行按一段处理；
+// 正文按空行分段：一行空行即分割线，连续空行按一段处理；
     // 段落首行形如「# 标题」时，剥掉前缀当作该段的小标题
     parseParagraphs(content) {
       if (content == null) return []
@@ -306,19 +310,17 @@ export default {
       if (block) blocks.push(block)
 
       return blocks.map((lines) => {
-        const isHeading = lines[0].startsWith('#')
-        if (!isHeading) return { heading: '', lines }
+        const heading = HEADING_PATTERN.exec(lines[0])
+        // 没写标题（「# 通知」不算）或者整行只有「#」：都当普通正文
+        if (!heading) return { heading: '', lines }
 
         const rest = lines.slice(1)
-        // 没有正文就整行当普通正文渲染，连「#」原文一起保留
+        // 标题就是这一整行，后面没有正文：连「#」原文一起当正文渲染
         if (!rest.length) return { heading: '', lines: [lines[0]] }
 
-        // 核心修改：
-        // 1. lines[0].slice(1) 先去掉开头的 '#'
-        // 2. .replace(/^ /, '') 再去掉紧接着的第一个空格（如果存在的话）
-        const headingText = lines[0].slice(1).replace(/^ /, '')
-
-        return { heading: headingText, lines: rest }
+        // 正则里第 1 组是那个可有可无的空格、第 2 组才是标题本体，
+        // 不用再单独 replace 掉空格
+        return { heading: heading[2], lines: rest }
       })
     },
   },
