@@ -7,4 +7,9 @@ html {
   text-autospace: normal;
 
   scroll-behavior: smooth;
+
+  // 滚动条的位置常驻预留着。内容高度一旦跨过视口高度，滚动条的出现和消失会让
+  // 页面宽度变一次，卡片跟着变窄、重新折行、卡片高度又跟着变，排版来回抖。
+  // 作业板是长期开着的大屏页面，预留这十几像素看不出来，抖一下很显眼
+  scrollbar-gutter: stable;
 }

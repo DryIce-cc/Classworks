@@ -4,64 +4,55 @@ $emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
 $standard-easing: cubic-bezier(0.2, 0, 0, 1);
 $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
 
-// 卡片容器基础过渡（分列重排时跟着动）
+// 卡片容器基础过渡（分列重排时跟着动）。
+// 只留淡入淡出：卡片换列时整张挪了位置，再叠一个位移就成了跳来跳去
 .grid-item {
-  transition:
-    transform 180ms $standard-easing,
-    opacity 180ms $standard-easing;
-  will-change: transform, opacity;
-  backface-visibility: hidden;
+  transition: opacity 200ms $standard-easing;
 }
 
-// 作业卡片挂载/卸载（TransitionGroup name="grid"）：轻快短促，只做一点位移
+// 作业卡片挂载/卸载（TransitionGroup name="grid"）：只做淡入淡出，不掺位移
 .grid-enter-active,
 .grid-leave-active {
-  transition:
-    opacity 180ms $standard-easing,
-    transform 180ms $standard-easing;
+  transition: opacity 200ms $standard-easing;
 }
 
-.grid-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
+.grid-enter-from,
 .grid-leave-to {
   opacity: 0;
-  transform: translateY(-6px);
 }
 
-// 空科目卡片动画
-.empty-subject-card {
-  transition: all 250ms $standard-easing;
-
-  &:hover {
-    transform: translateY(-4px) scale(1.02);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-  }
+// 离场的卡片不占位。它这时候已经在新列里淡入了（新列下面的卡片先跳下去），
+// 等过渡走完才从旧列消失（旧列下面的卡片又跳起来）——一次重排被拆成两下跳。
+// 绝对定位后两张卡片同一帧就位，只剩一下
+.grid-leave-active {
+  position: absolute;
 }
 
-// 待添加科目列表动画（TransitionGroup name="v-list"）
-.v-list-enter-active,
-.v-list-leave-active {
-  transition:
-    opacity 180ms $standard-easing,
-    transform 180ms $standard-easing;
+// 同列里因为上面的卡片增删而让位的那些，平滑挪过去，别硬切
+.grid-move {
+  transition: transform 200ms $standard-easing;
 }
 
-.v-list-enter-from {
+// 首屏那一版分列是按序号摆的（那时卡片高度还没量到），摆出来必然是错的。
+// 量完再淡入，好歹一次到位，不用先看个错的再跳
+.grid-masonry {
+  transition: opacity 200ms $standard-easing;
+}
+
+.grid-pending {
   opacity: 0;
-  transform: translateX(-8px);
-}
-
-.v-list-leave-to {
-  opacity: 0;
-  transform: translateX(8px);
 }
 
 // 卡片按压效果与触摸体验
 .v-card {
-  transition: all 400ms $emphasized-decelerate;
+  // 原来写的是 transition: all 400ms。all 会把离场淡出也一起接管：
+  // 卡片离场时按 all 走满 400ms，格子一直被占着，同排卡片等它走完才瞬移补上。
+  // 所以这里只列真正会动的属性，离场淡出走下面 .v-list-* 那套
+  transition:
+    transform 400ms $emphasized-decelerate,
+    box-shadow 400ms $emphasized-decelerate,
+    opacity 200ms $standard-easing,
+    width 200ms $standard-easing;
   touch-action: manipulation;
 
   &:active {
@@ -75,6 +66,47 @@ $standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
       margin: -8px;
     }
   }
+}
+
+// 空科目卡片动画
+.empty-subject-card {
+  transition:
+    opacity 200ms $standard-easing,
+    transform 200ms $standard-easing,
+    box-shadow 200ms $standard-easing;
+
+  &:hover {
+    // 抬升只留一点点，别跟上面作业卡片一个量级
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  }
+}
+
+// 待添加科目列表动画（TransitionGroup name="v-list"）：淡入即可，不掺位移。
+// 下面每条都得带上 .v-card 提一档权重：底部卡片本身就是 v-card，而 Vuetify 的
+// .v-card 规则是随工具栏那个 chunk 后加载的、权重又一样，会把同权重的规则盖掉——
+// position 被按回 relative（离场卡片继续占着格子），transition 也被换成不含
+// transform 的那套（让位时就没有滑动，只是瞬移）
+.v-list-enter-active.v-card,
+.v-list-leave-active.v-card {
+  transition: opacity 200ms $standard-easing;
+}
+
+.v-list-enter-from.v-card,
+.v-list-leave-to.v-card {
+  opacity: 0;
+}
+
+// 离场的卡片不占位。它淡出这 200ms 里格子还留着的话，同排卡片先被挤一下，
+// 等它走完才瞬移补上——「缺位」和「瞬移重排」都是这一个原因。
+// 脱离文档流后尺寸和静态位置都会变，由组件在离场前把当前的位置尺寸钉死
+.v-list-leave-active.v-card {
+  position: absolute;
+}
+
+// 同排卡片因为增删而让位时平滑挪过去，别瞬移
+.v-list-move.v-card {
+  transition: transform 200ms $standard-easing;
 }
 
 // 对话框：去掉点击波纹，并关掉卡片的按压效果

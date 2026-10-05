@@ -191,6 +191,11 @@ export default defineConfig({
     }),
     Fonts({
       google: {
+        // Roboto 只管拉丁字母和数字（汉字本来就走系统字体），但它后到的话
+        // 行高和折行位置都会变，整块作业板要重新分列一次，看着就是刷新后先乱动。
+        // optional 的意思是这次没赶上就用系统字体且不再替换：宁可第一次不用，
+        // 也不让首屏之后突然换字体
+        display: 'optional',
         families: [
           {
             name: 'Roboto',

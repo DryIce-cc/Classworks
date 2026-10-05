@@ -172,9 +172,24 @@ export default {
       const subject = this.state.availableSubjects.find((s) => s.name === this.currentEditSubject)
       return subject?.extraSubjects || []
     },
+    todayString() {
+      return this.formatDate(this.getToday())
+    },
+    isToday() {
+      return this.state.dateString === this.todayString
+    },
+    // 展示板要不要把「所看的这一天」之后的日子也摆上来。往后看（含今天）要，往回看不要：
+    // 过去那块板只呈现那一天自己，后来的作业存了档也不该在那儿冒出来。
+    // 拿今天当分界而不是拿所看的这一天，往后翻一天并不等于就能看到后一天的作业
+    showsFutureDays() {
+      return this.state.dateString >= this.todayString
+    },
     // 展示板只呈现「所看的这一天 + 更晚的日子」。
     // 更早的日子只可能是编辑面板里翻回去改的：存了档，但不该在这块板上冒出来。
+    // 看的是过去的日子时连更晚的一天都不摆：loadOtherDays 压根没把那些天读进来，
+    // 但面板里翻过去改的实时预览照样会递上来日期，不在这里挡住就会漏到板上
     laterDays() {
+      if (!this.showsFutureDays) return []
       const days = this.state.otherDays.slice()
       // 预览刚到、那天还在读进 otherDays 的路上时，先自己补一条空的占住位置，
       // 免得这一小段时间里展示板上少一段。内容随后由 handleHomeworkPreview 补上
@@ -185,13 +200,6 @@ export default {
       return days
         .filter((day) => day.dateString > this.state.dateString)
         .sort((a, b) => a.dateString.localeCompare(b.dateString))
-    },
-    isToday() {
-      const now = new Date()
-      const yyyy = now.getFullYear()
-      const mm = String(now.getMonth() + 1).padStart(2, '0')
-      const dd = String(now.getDate()).padStart(2, '0')
-      return this.state.dateString === `${yyyy}${mm}${dd}`
     },
   },
 
@@ -289,7 +297,7 @@ export default {
     // 当天和未来视图把更后面的作业一并读出来；查看过去日期时不启用——
     // 那块板只呈现那一天自己，别把后来的作业混进去
     async loadOtherDays() {
-      const todayStr = this.formatDate(this.getToday())
+      const todayStr = this.todayString
       if (this.state.dateString < todayStr) {
         this.state.otherDays = []
         return
@@ -352,22 +360,28 @@ export default {
     },
 
     // 存档里出现过、且确实有内容的科目（含后续日期）
+    // 同一天同一科目以预览为准，不用存档那份：正在编辑时存档还是改之前的样子，
+    // 拿存档来判就等于看不见这次编辑。正文被删空时预览值是空串，
+    // 那也是「这天它没有内容了」——不给存档让位的话，底部「点击添加作业」
+    // 那张卡片要等到完成编辑、存档真被改掉才出现
     storedSubjectNames() {
       const names = new Set()
-      const collect = (homework) => {
-        for (const [key, data] of Object.entries(homework || {})) {
-          if (data?.content?.trim()) names.add(key)
-        }
-      }
-      // 预览单算一遍：正在编辑的科目刚敲下第一个字，卡片区就该长出来，
-      // 那一天在存档里可能整个还不存在，collect 那边根本看不到它
-      for (const day of Object.values(this.state.preview)) {
-        for (const [key, content] of Object.entries(day)) {
+      const collect = (homework, dateString) => {
+        // 预览里的科目存档里可能还没有（那天整个记录都还没存过），
+        // 只扫存档的键会漏掉刚敲的第一个字，卡片区就长不出来
+        const keys = new Set([
+          ...Object.keys(homework || {}),
+          ...Object.keys(this.state.preview[dateString] || {}),
+        ])
+        for (const key of keys) {
+          const own = this.previewContent(dateString, key)
+          const content = own != null ? own : homework?.[key]?.content
           if (content?.trim()) names.add(key)
         }
       }
-      collect(this.state.boardData.homework)
-      for (const day of this.laterDays) collect(day.homework)
+      collect(this.state.boardData.homework, this.state.dateString)
+      // laterDays 已经把预览里各天补成占位项了，跟着它走就都算到了
+      for (const day of this.laterDays) collect(day.homework, day.dateString)
       return names
     },
 

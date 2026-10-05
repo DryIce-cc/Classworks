@@ -17,6 +17,8 @@
   display: flex;
   flex-direction: column;
   row-gap: 11px;
+  // 离场的卡片绝对定位后留在本列原处（见 transitions.scss），得有个定位父级
+  position: relative;
 }
 
 .grid-item {
@@ -50,11 +52,12 @@
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 9px 8px;
   padding: 10px;
+  // 离场的卡片脱离文档流后得有个定位父级，不然会飘到页面左上角
+  position: relative;
 }
 
 .empty-subject-card {
   cursor: pointer;
-  transition: all 0.2s ease;
   opacity: 0.8;
 }
 

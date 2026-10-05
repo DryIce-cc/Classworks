@@ -1,11 +1,13 @@
 <template>
   <div>
-    <!-- 作业卡片：按实测高度分列，三列各自独立纵向堆叠（无网格行、无行对齐） -->
-    <div ref="gridContainer" class="grid-masonry">
+    <!-- 作业卡片：按实测高度分列，三列各自独立纵向堆叠（无网格行、无行对齐）。
+         首屏那版分列是按序号摆的（高度还没量到），所以先整块藏着，量完再淡入 -->
+    <div ref="gridContainer" class="grid-masonry" :class="{ 'grid-pending': !measured }">
       <TransitionGroup
         v-for="(col, ci) in columnItems"
         :key="ci"
         name="grid"
+        move-class="grid-move"
         tag="div"
         class="grid-column"
       >
@@ -59,7 +61,13 @@
          也留一张「继续添加作业」卡片 -->
     <div ref="emptySubjects" class="empty-subjects mt-4">
       <div class="empty-subjects-grid">
-        <TransitionGroup name="v-list">
+        <!-- 这里不能加 tag：TransitionGroup 默认渲染成片段，卡片直接当 .empty-subjects-grid
+             的子元素 participating 网格排布；套一层 div 就只剩一个子元素，会排成竖排 -->
+        <TransitionGroup
+          name="v-list"
+          move-class="v-list-move"
+          @before-leave="holdLeavingBox"
+        >
           <v-card
             v-for="subject in addableSubjects"
             :key="subject.name"
@@ -109,12 +117,14 @@ export default {
     return {
       // 布局版本号：分列结果变化时才 +1，避免量高度触发无限重渲染
       layoutVersion: 0,
+      // 卡片高度还没量全（首帧），分列是临时的，先别露出来
+      measured: false,
     }
   },
   created() {
-    // 实测的卡片高度（非响应式，靠 layoutVersion 触发重算）
+    // 实测的卡片高度（非响应式，靠 layoutVersion 触发重算），
+    // 每张的高度里已经带上了它自己那一份卡片间距
     this._heights = {}
-    this._gap = 0
     this._signature = ''
     // 待执行的自动上滑的定时器
     this._scrollTimer = 0
@@ -199,6 +209,21 @@ export default {
       })
     },
 
+    // 离场的卡片马上要脱离文档流（见 transitions.scss 的 .v-list-leave-active），
+    // 脱离后网格不再给它宽度、静态位置也会重排到别的格子去，淡出那一瞬看着像
+    // 「往下挪一截再消失」。这里把当前的位置和尺寸钉死，它就只在原地淡出
+    holdLeavingBox(el) {
+      const box = el.getBoundingClientRect()
+      const host = el.offsetParent
+      if (host) {
+        const hostBox = host.getBoundingClientRect()
+        el.style.left = `${box.left - hostBox.left + host.scrollLeft}px`
+        el.style.top = `${box.top - hostBox.top + host.scrollTop}px`
+      }
+      el.style.width = `${box.width}px`
+      el.style.height = `${box.height}px`
+    },
+
     // 点卡片上某一天的那一块：直接进那一天，不用先进今天再自己往前翻。
     // 卡片冒泡上来的那次点击（标题区、卡片留白）不带日期，走的是另一条路
     openDay(item, day) {
@@ -235,50 +260,176 @@ export default {
       window.scrollTo({ top: window.scrollY - distance, behavior: 'smooth' })
     },
 
-    // 按实测高度把每张卡放进当前最矮的列（贪心）。
-    // 各列等宽，卡片高度与分列结果无关，所以量一次就能收敛，不会循环。
-    // 还没量到高度时（首屏第一帧）按序号取余，保证有内容可量。
+    // 按实测高度把卡片分列。各列等宽，卡片高度与分列结果无关，
+    // 所以量一次就能收敛，不会循环。
+    // 还没量到高度时（首屏第一帧）按序号取余，保证每张都有位置、能被量到。
     // 注意：必须是普通方法（每次现算），不能是 computed——
-    // 高度存在非响应式的 _heights 里，computed 缓存会让 updateLayout 永远读到旧分配。
+    // 高度存在非响应式的 _heights 里，computed 缓存会让 updateLayout 永远读到旧分配
     assignColumns() {
       const cols = Array.from({ length: this.effectiveColumns }, () => [])
-      if (!this.sortedItems) return cols
-      const heights = this._heights || {}
-      const gap = this._gap || 0
-      const colHeights = new Array(this.effectiveColumns).fill(0)
-      const colCounts = new Array(this.effectiveColumns).fill(0)
-      this.sortedItems.forEach((item, idx) => {
-        let target
-        if (heights[item.key] == null) {
-          target = idx % this.effectiveColumns
-        } else {
-          target = 0
-          let best = Infinity
-          for (let c = 0; c < this.effectiveColumns; c++) {
-            const h = colHeights[c] + (colCounts[c] > 0 ? gap : 0) + heights[item.key]
-            if (h < best) {
-              best = h
-              target = c
-            }
-          }
+      if (!this.sortedItems || !this.sortedItems.length) return cols
+      const heights = this.sortedItems.map((item) => this._heights?.[item.key])
+      // 有卡片还没量到高度：先按序号取余分列，等量到了自然会重排
+      if (heights.some((h) => h == null)) {
+        this.sortedItems.forEach((item, idx) => cols[idx % cols.length].push(item))
+        return cols
+      }
+      return this.solveColumns(heights).map((idxs) => idxs.map((i) => this.sortedItems[i]))
+    },
+
+    // 回溯求最优分列：先让最高的那一列尽量矮，再让各列挨得更齐。
+    // 三级比较依次是「最高列高 → 列高极差 → 列高方差」，卡在第一级就不看后面两级，
+    // 所以不会为了好看去牺牲整体高度
+    solveColumns(heights) {
+      const c = this.effectiveColumns
+      const n = heights.length
+      const avg = heights.reduce((sum, h) => sum + h, 0) / c
+      // 高度是量出来的整数，这个容差只为躲开浮点累加的零头
+      const EPS = 1e-6
+      // 搜索规模（科目数 × 列数）不大，但最坏情况仍有可能翻车；
+      // 给个节点上限，超了就取搜索途中最好的那个，绝不卡住界面
+      const budget = 250000
+
+      // 三级比较。方差除以列数是同一个常数，不影响比较，省掉
+      const measure = (loads) => {
+        let max = 0
+        let min = Infinity
+        let variance = 0
+        for (const load of loads) {
+          if (load > max) max = load
+          if (load < min) min = load
+          variance += (load - avg) ** 2
         }
-        cols[target].push(item)
-        colHeights[target] += (heights[item.key] || 0) + (colCounts[target] > 0 ? gap : 0)
-        colCounts[target]++
-      })
+        return [max, max - min, variance]
+      }
+      const better = (a, b) =>
+        a[0] < b[0] - EPS || (a[0] < b[0] + EPS && a[1] < b[1] - EPS) ||
+        (a[0] < b[0] + EPS && a[1] < b[1] + EPS && a[2] < b[2] - EPS)
+
+      // 贪心解当上界：一份按原始顺序放最矮列，一份按高度降序放最矮列（更接近最优）
+      const greedy = (order) => {
+        const loads = new Array(c).fill(0)
+        const assign = new Array(n).fill(-1)
+        for (const i of order) {
+          let target = 0
+          if (i > 0) {
+            for (let j = 1; j < c; j++) if (loads[j] < loads[target]) target = j
+          }
+          loads[target] += heights[i]
+          assign[i] = target
+        }
+        return { loads, assign }
+      }
+
+      // 展示板上的第一科（语文）永远是左上角那张，先把它放进最左列，剩下的卡片再搜。
+      // 不能靠「第一个开出来的列就是最左列」顺带钉住它：那样最高的那张卡片会被
+      // 强行塞进语文那一列，卡片只能往上压，长卡片反而露不出来
+      const rest = heights
+        .map((_, i) => i)
+        .filter((i) => i > 0)
+        // 一样高的卡片按科目原顺序处理，不按索引顺序乱来
+        .sort((a, b) => heights[b] - heights[a] || a - b)
+      const m = rest.length
+      const seq = heights.map((_, i) => i)
+      const byHeight = greedy([0, ...rest])
+      const inOrder = greedy(seq)
+      let bestLoads = better(measure(byHeight.loads), measure(inOrder.loads)) ? byHeight : inOrder
+      let bestScore = measure(bestLoads.loads)
+      let bestAssign = bestLoads.assign
+
+      // 剩余卡片高度总和，用来判断「剩下的卡片总容量装不装得下」
+      const suffix = new Array(m + 1).fill(0)
+      for (let k = m - 1; k >= 0; k--) suffix[k] = suffix[k + 1] + heights[rest[k]]
+      const minLoad = (used) => {
+        let min = Infinity
+        for (let j = 0; j < used; j++) if (loads[j] < min) min = loads[j]
+        return min
+      }
+
+      const loads = new Array(c).fill(0)
+      loads[0] = heights[0]
+      const assign = new Array(n).fill(-1)
+      assign[0] = 0
+      let left = budget
+      let sum = heights[0]
+
+      const search = (k, used) => {
+        if (left-- <= 0) return
+        if (k === m) {
+          const score = measure(loads)
+          if (better(score, bestScore)) {
+            bestScore = score
+            bestAssign = assign.slice()
+          }
+          return
+        }
+        // 已经有列高过当前最优的最高列：后面只会更高，直接剪
+        for (let j = 0; j < used; j++) if (loads[j] > bestScore[0] + EPS) return
+        // 剩下的卡片就算塞满 c 列的余量也超了：塞不下，剪
+        if (sum + suffix[k] > c * (bestScore[0] + EPS)) return
+        const i = rest[k]
+        const h = heights[i]
+        // 列都用满了的话，最大的这张得先放得下才有可能
+        if (used >= c && h > bestScore[0] - minLoad(used) + EPS) return
+
+        // 各列没有区别，当前高度相同的列只试一个，免得同一批分配被枚举好几遍。
+        // 最左列不算在内：语文在那儿，它跟别的列换不了位置
+        const tried = []
+        for (let j = 0; j < used; j++) {
+          if (j > 0) {
+            if (tried.includes(loads[j])) continue
+            tried.push(loads[j])
+          }
+          if (loads[j] + h > bestScore[0] + EPS) continue
+          loads[j] += h
+          sum += h
+          assign[i] = j
+          search(k + 1, used)
+          loads[j] -= h
+          sum -= h
+          assign[i] = -1
+          if (left <= 0) return
+        }
+        // 开新列：语文之外各列之间没有区别，只开第一个空列
+        if (used < c) {
+          loads[used] = h
+          sum += h
+          assign[i] = used
+          search(k + 1, used + 1)
+          loads[used] = 0
+          sum -= h
+          assign[i] = -1
+        }
+      }
+      search(0, 1)
+
+      // 搜索里列是按「先开出来」的顺序编号的，列与列之间本来就没有区别，
+      // 所以左右顺序由各列第一张卡片的科目顺序定下来（语文那列自然还在最左边）。
+      // 卡片入列时是按原序推进的，每列第一张就是视觉上的最上面那张
+      const cols = Array.from({ length: c }, () => [])
+      for (let i = 0; i < n; i++) cols[bestAssign[i]].push(i)
+      cols.sort((a, b) => (a.length ? a[0] : Infinity) - (b.length ? b[0] : Infinity))
       return cols
     },
+
     // 实测每张卡片高度，按签名变化才触发重排，保证收敛不循环
     updateLayout() {
       const container = this.$refs.gridContainer
       if (!container) return
       const colEl = container.querySelector('.grid-column')
-      this._gap = colEl ? parseFloat(window.getComputedStyle(colEl).rowGap) || 0 : 0
+      const gap = colEl ? parseFloat(window.getComputedStyle(colEl).rowGap) || 0 : 0
       const heights = {}
       container.querySelectorAll('.grid-item').forEach((el) => {
-        if (el.dataset.key) heights[el.dataset.key] = el.offsetHeight
+        // 卡片间的留白算进卡片自己的高度，这样一列的高度就是纯求和，
+        // 不用再管「这一列的第一张要不要算留白」这种分支
+        if (el.dataset.key) heights[el.dataset.key] = el.offsetHeight + gap
       })
       this._heights = heights
+      // 每张卡片都量到了，分列才算靠得住。量全之前一直挂着临时摆位，
+      // 首屏就会先看见一个错的布局再跳成对的，不如等量全了再淡入
+      if (!this.measured) {
+        this.measured = this.sortedItems.every((item) => heights[item.key] != null)
+      }
       const sig = this.assignColumns()
         .map((col) => col.map((i) => i.key).join(','))
         .join('|')
