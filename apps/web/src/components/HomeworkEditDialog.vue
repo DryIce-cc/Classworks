@@ -10,12 +10,13 @@
     <v-card border>
       <!-- 顶部倒计条：一动不动就自动关掉，防的是误触打开。
            打开后先给 IDLE_CLOSE_DELAY；动过一次以后改成 IDLE_CLOSE_RESET_DELAY，
-           之后每动一次都重新起算。key 换掉让条重新挂载，动画才从头走 -->
+           之后每动一次都重新起算。key 换掉让条重新挂载，动画才从头走。
+           页面看不见时整轮作废，回来一律从 IDLE_CLOSE_RESET_DELAY 重新起算 -->
       <div v-if="countdownActive" class="close-countdown">
         <div :key="countdownKey" class="close-countdown-bar" :style="closeCountdownStyle" />
       </div>
 
-      <v-card-title class="d-flex align-center">
+      <v-card-title class="hw-title">
         {{ title }}
       </v-card-title>
 
@@ -27,9 +28,9 @@
             <!-- 日期小标题 + 切换日期的按钮；没有下限，一直能往前翻，只在已经离开今天时给「回到今天」 -->
             <div class="date-caption">
               <!-- 平时就是原来那行灰字（Vuetify 的 text-medium-emphasis，和原来的
-                   opacity:.6 是一个意思）。从卡片上某一天的那一块进来时只换文字
-                   颜色成黄色，位置、字号、行高一个字都没动 -->
-              <span class="day-label" :class="offTodayHint ? 'text-yellow' : 'text-medium-emphasis'">{{ dayName }}的作业</span>
+                   opacity:.6 是一个意思）。只要看的不是今天就染黄，位置、字号、行高一个字都没动。
+                   条件和「回到今天」那个按钮同源，都看当前这一天是不是今天 -->
+              <span class="day-label" :class="canGoToday ? 'text-yellow' : 'text-medium-emphasis'">{{ dayName }}的作业</span>
               <v-spacer />
               <v-btn
                 v-if="canGoToday"
@@ -341,7 +342,7 @@ const INTERACTIVE_SELECTOR =
 // 按下到抬起的位移超过这个值就当作滚动，不关面板
 const TAP_SLOP = 10
 // 离控件这么近以内也算点到了它
-const NEAR_PADDING = 30
+const NEAR_PADDING = 15
 // 打开后 7s 内一动不动就自动关掉，防的是误触打开
 const IDLE_CLOSE_DELAY = 7000
 // 动过一次之后的倒计时长：之后再无动作 15s 关闭，有动作就重置成这个值重新算
@@ -406,10 +407,6 @@ export default {
       // 读进来时的样子，用来判断哪些天被改过
       initialDrafts: {},
       currentDate: '',
-      // 「你现在看的是那一天」这个提示亮不亮。从卡片上某一天的那一块进来、
-      // 而那天不是今天时，开面板那一下亮；一翻日期就熄，熄了不再亮回来——
-      // 提示的话说一遍就够了，反复亮就成了常驻装饰
-      offTodayHint: false,
       currentLine: '',
       currentLineStart: 0,
       currentLineEnd: 0,
@@ -455,6 +452,8 @@ export default {
     // selectionchange 是唯一兜得住的口子——但页面上任何选区都触发它，
     // 所以只认焦点落在我们这个 textarea 上的情况
     document.addEventListener('selectionchange', this.onDocumentSelectionChange, true)
+    // 看不见这个页面（切了标签页、窗口被最小化或完全遮住）就停表，见 handleVisibilityChange
+    document.addEventListener('visibilitychange', this.handleVisibilityChange)
     // Esc / Ctrl+S 挂 document 捕获阶段，不挂卡片：点了卡片里不可聚焦的地方
     // （正文、推荐面板的空白）焦点会掉回 body，这时卡片上的 @keydown 收不到按键
     document.addEventListener('keydown', this.handleKeydown, true)
@@ -467,6 +466,7 @@ export default {
     document.removeEventListener('keydown', this.resetCloseCountdown, true)
     document.removeEventListener('wheel', this.resetCloseCountdown, true)
     document.removeEventListener('selectionchange', this.onDocumentSelectionChange, true)
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     document.removeEventListener('keydown', this.handleKeydown, true)
     this.stopCloseCountdown()
   },
@@ -621,7 +621,6 @@ export default {
         this._baseCache = {}
         // 从面板出现那一刻开始算，读存档的耗时也算在这段倒计里
         this.startCloseCountdown()
-        this.offTodayHint = this.startDate !== this.todayString
         await this.loadContent(this.startDate)
         this.focusAndSync()
       } else {
@@ -659,6 +658,18 @@ export default {
     resetCloseCountdown() {
       if (!this._closeTimer) return
       this.startCloseCountdown(IDLE_CLOSE_RESET_DELAY)
+    },
+
+    // 页面看不见时（切了标签页、窗口最小化或被完全遮住）不计表：
+    // 人在别处忙不算「一动不动」，回来反而该重罚，所以从头给一整段
+    // IDLE_CLOSE_RESET_DELAY，不再按误触的 IDLE_CLOSE_DELAY 算。
+    // 条也跟着重来——startCloseCountdown 换 key 会让它重新挂载，正好从满格走
+    handleVisibilityChange() {
+      if (document.hidden) {
+        this.stopCloseCountdown()
+        return
+      }
+      if (this.dialogVisible) this.startCloseCountdown(IDLE_CLOSE_RESET_DELAY)
     },
 
     // 切到某一天：没访问过就读存档存成草稿，访问过就直接用草稿
@@ -719,9 +730,7 @@ export default {
     // 不然跨页之后那些标记还留着，回头就找不着它原来管的那几行了。
     // 落实完就 goto 过去——搬走的内容已经进了 drafts，完成编辑时 changedDrafts
     // 会把当天和所有目标日一起交回去写盘，这里不用另外 emit。
-    // 「不在今天」那句提示到此为止：翻回去也不再亮
     async switchDate(dateString) {
-      this.offTodayHint = false
       await this.settleReservations()
       await this.loadContent(dateString)
       this.focusAndSync()
@@ -763,7 +772,7 @@ export default {
       if (press.inside && Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP) return
       // 这一下是专门用来收起日期选择器的（点在它外面），别顺带把面板也关了
       if (press.pickerOpen && !this.insideFloatingOverlay(event.clientX, event.clientY)) return
-      if (this.nearInteractive(event.clientX, event.clientY)) return
+      if (this.nearInteractive(event.clientX, event.clientY, press.inside)) return
       this.handleClose()
     },
 
@@ -788,12 +797,17 @@ export default {
       return false
     },
 
-    // 这一下像是想点某个控件吗
-    nearInteractive(x, y) {
+    // 这一下像是想点某个控件吗。slack 是「按下时落在卡片里」，
+    // 决定给不给 NEAR_PADDING 那圈手抖容错：卡片里面点偏了要护着，
+    // 遮罩上不给——卡片四边本来就贴着控件（左边编辑框、右边小键盘、
+    // 下边一整排推荐词），一给容错，贴着边点遮罩就永远被判成想点控件，
+    // 面板再也关不掉。字号调大之后卡片更占地方，这个毛病只会更明显
+    nearInteractive(x, y, slack) {
       if (this.insideFloatingOverlay(x, y)) return true
       for (const el of document.elementsFromPoint(x, y) || []) {
         if (el.closest?.(INTERACTIVE_SELECTOR)) return true
       }
+      if (!slack) return false
       // 手抖点偏了：附近 NEAR_PADDING 内还有控件，也不关。只扫对话框内部——
       // 外面展示板上的卡片再密也不该拖住这个面板，合起来又是一次全文档遍历
       const own = this.dialogContent()
@@ -1471,10 +1485,15 @@ export default {
   }
 }
 
+.hw-title {
+  margin-left: 7px;
+  margin-top: 14px;
+}
+
 /* 内容区。标题栏自带 8px 下内边距，这里再补 8px，标题到内容正好 16px——
    和左边的 16px 对齐 */
 .hw-panel {
-  padding-top: 8px;
+  margin-top: -26px;
 }
 
 /* 日期小标题：右侧放切换日期的按钮 */

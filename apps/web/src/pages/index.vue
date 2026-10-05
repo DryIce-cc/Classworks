@@ -1,6 +1,6 @@
 <template>
   <v-toolbar class="no-select" color="surface" elevation="4">
-    <v-toolbar-title class="text-h6">
+    <v-toolbar-title class="text-h6" :class="isToday ? '' : 'text-yellow'">
       {{ titleText }}的作业
     </v-toolbar-title>
 
