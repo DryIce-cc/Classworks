@@ -1,4 +1,3 @@
-<!-- 作业编辑对话框：一个编辑框，靠日期小标题两侧的按钮切换要编辑哪一天 -->
 <template>
   <v-dialog
     v-model="dialogVisible"
@@ -9,7 +8,7 @@
     persistent
   >
     <v-card border>
-      <!-- 顶部倒计条：5s 内一动不动就自动关掉，防的是误触打开 -->
+      <!-- 顶部倒计条：IDLE_CLOSE_DELAY 内一动不动就自动关掉，防的是误触打开 -->
       <div v-if="countdownActive" class="close-countdown">
         <div class="close-countdown-bar" :style="closeCountdownStyle" />
       </div>
@@ -134,13 +133,9 @@
                 </v-chip>
               </div>
             </div>
-
           </div>
 
-          <!-- Quick Tools Section -->
           <div class="quick-tools ml-4" style="min-width: 180px">
-
-            <!-- Numeric Keypad -->
             <div class="numeric-keypad">
               <div class="keypad-row">
                 <v-btn
@@ -178,8 +173,7 @@
                   {{ n + 6 }}
                 </v-btn>
               </div>
-              <!-- 这行的两头按光标前面停在哪换：默认 P 第，纯数字后 ~ .，
-                   p123 后 ~ 第，第123 后 ~ + -->
+              <!-- 这行的两头按光标前面停在哪换，规则见 contextKeys 的注释表 -->
               <div class="keypad-row">
                 <v-btn
                   class="keypad-btn"
@@ -211,8 +205,7 @@
                 </v-btn>
               </div>
               <div class="keypad-row">
-                <!-- 图标放默认插槽里，不用 icon 属性：icon 会强制成圆形，和旁边的键位对不上。
-                     触发交给 v-repeat-click，所以这里只留 @mousedown.prevent 保住输入框的焦点 -->
+                <!-- 触发交给 v-repeat-click，所以这里只留 @mousedown.prevent 保住输入框的焦点 -->
                 <v-btn
                   v-repeat-click="{ handler: deleteLastChar }"
                   class="keypad-btn"
@@ -222,9 +215,9 @@
                   aria-label="删除"
                   @mousedown.prevent
                 >
+                  <!-- 图标放默认插槽里，不用 icon 属性：icon 会强制成圆形，和旁边的键位对不上 -->
                   <v-icon icon="mdi-backspace-outline" size="small" />
                 </v-btn>
-                <!-- 这一行有内容时才值得换行：办完了这一条接着开下一条 -->
                 <v-btn
                   class="keypad-btn keypad-word"
                   size="small"
@@ -246,8 +239,7 @@
                 </v-btn>
               </div>
 
-              <!-- 量词。刚敲完一个数才出现，平时收起来不占地方。
-                   自己一行、均分整行，不跟上面那个三列网格对齐 -->
+              <!-- 量词。刚敲完一个数才出现，平时收起来不占地方 -->
               <div v-if="showBottomKeys" class="measure-row">
                 <v-btn
                   v-for="key in bottomKeys"
@@ -265,9 +257,7 @@
           </div>
         </div>
         <!-- 推荐面板：在编辑框和小键盘那一整行的下面，横着铺满卡片，右边缘和小键盘对齐。
-             固定三行、固定高度，写字时编辑框不会上下跳。停在哪一层由正文推出来，
-             不另记状态，所以光标落到空行上自动回到第一层。量词和介词不在面板上，
-             在小键盘底下。面板只往正文里加字：不加空格也不改字 -->
+             固定高度（.phrase-panel 写死了），写字时编辑框不会上下跳 -->
         <div class="phrase-panel">
           <div
             v-for="(row, ri) in panel"
@@ -305,13 +295,13 @@ import dataProvider from '@/utils/dataProvider'
 import { formatDayName, parseDateString, shiftDateString, toDateString } from '@/utils/date'
 import {
   BOTTOM_KEYS,
+  assembleDayContent,
   contextKeys,
   findDayBlockEnd,
   commonDayInSelection,
   mergeLinesInto,
   detachLineFromScope,
   selectionHeadings,
-  spliceIntoDay,
   headingAbove,
   ownerAt,
   headingAboveStart,
@@ -320,6 +310,7 @@ import {
   hints,
   isHeadingLine,
   hasContent,
+  lineAt,
   panelRows,
   pruneDayHeading,
   parseReserveLine,
@@ -341,20 +332,11 @@ const INTERACTIVE_SELECTOR =
 const TAP_SLOP = 10
 // 离控件这么近以内也算点到了它
 const NEAR_PADDING = 30
-// 打开后 5s 内一动不动就自动关掉，防的是误触打开
+// 打开后 7s 内一动不动就自动关掉，防的是误触打开
 const IDLE_CLOSE_DELAY = 7000
 // 正文末尾留几个空行，方便接着写下一条。面板从「继续添加作业」卡片进来时会抬到 2
 // （appendBlankLines），但那是「另起一份」的排版需求，只对正在编辑的那天成立
 const DEFAULT_BLANK_LINES = 1
-
-// 把若干块预定内容接到那天已有正文后面，返回新正文。
-// 落进草稿（完成编辑时）和拼进预览快照用的是同一个函数，两边算出来的必须一致，
-// 否则展示板上看到的和最后存下来的不是一回事
-function assembleDayContent(existing, blocks) {
-  let lines = existing ? existing.trim().split('\n') : []
-  for (const block of blocks) lines = spliceIntoDay(lines, block.heading, block.lines)
-  return lines.join('\n')
-}
 
 // 从 ownerStart 起删掉一整行。标题没了，它下面那段正文就露出来了——
 // 上面要是还有个小标题，得空一行隔开，不然这段会被顺手收进那个标题里；
@@ -407,10 +389,10 @@ export default {
   data() {
     return {
       // 日期 -> 正文。翻到别的日期再翻回来时，这一天的改动还在，
-      // 关闭时一次性把所有改动过的日期写回去。
+      // 关闭时一次性把所有改动过的日期写回去
       drafts: {},
+      // 读进来时的样子，用来判断哪些天被改过
       initialDrafts: {},
-      // 当前正在编辑哪一天
       currentDate: '',
       currentLine: '',
       currentLineStart: 0,
@@ -431,13 +413,10 @@ export default {
   created() {
     // 按下位置，不进响应式：只是用来判断这一下算不算「点击空白」
     this._press = null
-    // 倒计的定时器
     this._closeTimer = 0
-    // 目标日的存档正文，日期 -> 正文。预览要同步拿这份底稿算拼装结果，
-    // 不能每敲一个字就等一次 IndexedDB，所以读过一次就留着
+    // 目标日的存档正文，日期 -> Promise。预览每敲一个字都要用，不能每次都去等
+    // IndexedDB，所以连 Promise 一起存着，并发调用自然共用同一次读取
     this._baseCache = {}
-    // 同一时刻正在读的目标日，日期 -> Promise，避免并发时重复打存档
-    this._baseLoads = {}
     // 预览的世代号：读存档是异步的，回来时正文可能又变了，过期的那份直接扔掉
     this._previewToken = 0
   },
@@ -511,16 +490,14 @@ export default {
       return !!this.currentDate && this.currentDate !== this.todayString
     },
 // 「的 xx」那个 xx 用光标所在那一节的小标题名。光标停在标题行上就用它自己，
-// 在正文里就是管着它的那一行标题；都没有就空着，面板退回「的作业」
+    // 在正文里就是管着它的那一行标题；都没有就空着，面板退回「的作业」
     reserveScope() {
       if (isHeadingLine(this.currentLine)) return this.currentLine
       return headingAbove(this.content, this.currentLineStart)
     },
-// 面板的四行。哪一层都正好四行，高度才不变来变去
+    // 面板的四行，哪一层都正好四行，高度才不变来变去。
+    // 选中了多行就只给日期那一栏，点亮的是选区里那些标题解出来的那天
     panel() {
-      // 日期按钮永远以今天为相对，不管正在编辑哪一天；
-      // 「默认点亮」的那个按钮是当前正在编辑的那天。
-      // 选中了多行就只给日期那一栏，点亮的是选区里那些标题解出来的那天
       const selection = this.selectedRange ? { day: this.selectionDay } : null
       return panelRows(
         this.currentLine,
@@ -540,7 +517,6 @@ export default {
         this.todayString,
       )
     },
-    // 小键盘底下那排量词：课 题 章 张
     bottomKeys() {
       return BOTTOM_KEYS
     },
@@ -549,24 +525,17 @@ export default {
       if (!this.inputFocused) return ['P', '第']
       return contextKeys(this.textBeforeCaret)
     },
-    // 该亮哪几个，全看光标前面那几个字。焦点不在输入框里就都不亮——
-    // 高亮是给正在敲字的人看的，不是常驻装饰
-    keyHints() {
-      if (!this.inputFocused) return { suffix: false }
-      return hints(this.textBeforeCaret)
-    },
     // 量词那一排（页 张 题 课 章）该不该出现：光标前面紧挨着一个阿拉伯数字就该出现。
     // 放 computed 不放 methods：模板里 v-if 写的是 showBottomKeys（不加括号），
     // 拿 methods 的话模板取到的是那个函数本身，永远为真，这一排就从来不隐藏
     showBottomKeys() {
-      return this.inputFocused && this.keyHints.suffix
+      return this.inputFocused && hints(this.textBeforeCaret)
     },
     // 光标在这一行里的位置。放在 data 里跟着 updateCurrentLine 一起更新，
     // 不在 computed 里摸 DOM——渲染期读 selectionStart 既不响应，又可能炸掉整个面板
     textBeforeCaret() {
       return this.currentLine.slice(0, this.caretInLine)
     },
-    // 这一行已经有内容了才谈得上「这一条可以收了」，小键盘的换行这时才亮
     // 换行只在「这一行真有内容」的时候才亮：光秃秃一个数字、或者只有标点，
     // 现在换行只会把没写完的东西切两半
     canEndLine() {
@@ -579,7 +548,7 @@ export default {
   },
   watch: {
     // 正文一动就把预览推给展示板。存盘不归这里管——预览只是给外面看，
-    // 真正写盘仍然只发生在完成编辑（以及翻日期时的预定内容，见 switchDate）
+    // 真正写盘只发生在 handleClose
     drafts: {
       deep: true,
       handler() {
@@ -592,21 +561,20 @@ export default {
         this.initialDrafts = {}
         // 上一次编辑读过的存档作废：这段时间里存档可能已经被写过了
         this._baseCache = {}
-        // 从面板出现那一刻开始算，读存档的耗时也算在这 5s 里
+        // 从面板出现那一刻开始算，读存档的耗时也算在这段倒计里
         this.startCloseCountdown()
         await this.loadContent(this.startDate)
-this.$nextTick(() => {
-          this.focusInput()
-          this.updateCurrentLine()
-        })
+        this.focusAndSync()
       } else {
         this.stopCloseCountdown()
       }
     },
   },
   methods: {
-    // 顶部倒计条：走满 5s 就自动关掉。倒计只从打开那一刻起算，
-    // 面板里任何一点动静都会把它撤掉，此后不再自动关。
+    // 顶部倒计条：打开后 IDLE_CLOSE_DELAY 内一动不动就自动关掉，防的是误触打开。
+    // 倒计只从打开那一刻起算，面板里任何一点动静都会把它撤掉，此后不再自动关。
+    // 撤掉的动作挂在 document 上，所以那之前必然已经被 keydown / pointerdown 撤过一次——
+    // 也就是说真走到定时器这里时，正文一定是原样没动过的，撤了也不会丢东西。
     // 条走完靠 CSS 动画，和这里的定时器同时起步，不会出现条没走完就关。
     startCloseCountdown() {
       this.stopCloseCountdown()
@@ -614,7 +582,7 @@ this.$nextTick(() => {
       this._closeTimer = window.setTimeout(() => {
         this._closeTimer = 0
         this.countdownActive = false
-        this.autoCloseOnIdle()
+        this.handleClose()
       }, IDLE_CLOSE_DELAY)
     },
 
@@ -630,27 +598,11 @@ this.$nextTick(() => {
       this.stopCloseCountdown()
     },
 
-    // 倒计走完：正文被动过就不关，交给用户继续编辑
-    autoCloseOnIdle() {
-      if (this.changedDrafts().length) return
-      this.handleClose()
-    },
-
     // 切到某一天：没访问过就读存档存成草稿，访问过就直接用草稿
     async loadContent(dateString) {
       this.currentDate = dateString
       if (this.drafts[dateString] != null) return
-      let content = ''
-      try {
-        const data = await dataProvider.loadData('classworks-data-' + dateString)
-        if (data && data.success !== false) content = data.homework?.[this.title]?.content || ''
-      } catch (error) {
-        console.error('读取作业失败:', error)
-      }
-      // 读进来先去掉首尾空白。存档里本来就该是干净的，但旧版本会把面板入口
-      // 要求的空行一起写进去（见 settleReservations），在这儿理掉，
-      // 末尾的空行才是我们自己按份数留的
-      const trimmed = content.trim()
+      const trimmed = (await this.ensureBase(dateString)).trim()
       this.initialDrafts[dateString] = trimmed
       this.drafts[dateString] = this.padTrailingBlankLines(trimmed)
     },
@@ -659,7 +611,7 @@ this.$nextTick(() => {
     // 不该跟着那个入口走——传 DEFAULT_BLANK_LINES
     padTrailingBlankLines(content, want = this.appendBlankLines) {
       if (!content) return content
-      const count = Math.max(0, Math.trunc(want))
+      const count = Math.max(0, want)
       const have = /(\n*)$/.exec(content)[1].length
       return have >= count ? content : content + '\n'.repeat(count - have)
     },
@@ -683,12 +635,7 @@ this.$nextTick(() => {
       }
       const text = prefix + `# ${name}\n`
       this.content = this.content.slice(0, start) + text + this.content.slice(end)
-      const position = start + text.length
-      this.$nextTick(() => {
-        textarea.focus()
-        textarea.setSelectionRange(position, position)
-        this.updateCurrentLine()
-      })
+      this.$nextTick(() => this.restoreLineCaret(start + text.length))
     },
 
     // 过去的日子也翻得动，所以两个方向都不设限
@@ -696,7 +643,6 @@ this.$nextTick(() => {
       this.switchDate(shiftDateString(this.currentDate, offset))
     },
     goToday() {
-      if (this.currentDate === this.todayString) return
       this.switchDate(this.todayString)
     },
     selectDate(value) {
@@ -706,20 +652,19 @@ this.$nextTick(() => {
     },
     // 翻日期也是一种「离开」，先把正文里的预定标记落实掉，
     // 不然跨页之后那些标记还留着，回头就找不着它原来管的那几行了。
-    // 预定内容在这里就直接交回去写盘，不等完成编辑——它已经被搬到别的日子去了，
-    // 留在原地不动反而对不上。目标日的草稿也一起跟上（settleReservations 里写的），
-    // 完成编辑时会再存一遍同值，重复但不冲突
+    // 落实完就 goto 过去——搬走的内容已经进了 drafts，完成编辑时 changedDrafts
+    // 会把当天和所有目标日一起交回去写盘，这里不用另外 emit
     async switchDate(dateString) {
-      const moved = await this.settleReservations()
-      if (moved.length) this.$emit('save', moved)
-      await this.goToDate(dateString)
-    },
-    async goToDate(dateString) {
+      await this.settleReservations()
       await this.loadContent(dateString)
+      this.focusAndSync()
+    },
+    // 输入框重新可用了才能定位光标，所以聚焦要等一拍
+    focusAndSync() {
       this.$nextTick(() => {
         this.focusInput()
         this.updateCurrentLine()
-        })
+      })
     },
     focusInput() {
       if (this.$refs.inputRef) this.$refs.inputRef.focus()
@@ -765,8 +710,8 @@ this.$nextTick(() => {
       return document.querySelector('.homework-dialog-content')
     },
 
-    // 这一下落在日期选择器之类的浮层里吗（浮层渲染在卡片内部，但不是对话框自己的容器）。
-    // 外面工具栏的选择器是另一个实例，各关各的。
+    // 日期选择器虽然渲染在卡片内部，但属于另一个 .v-overlay__content。
+    // 外面工具栏的选择器是另一个实例，各关各的
     insideFloatingOverlay(x, y) {
       const ownContent = this.dialogContent()
       for (const el of document.elementsFromPoint(x, y) || []) {
@@ -782,8 +727,10 @@ this.$nextTick(() => {
       for (const el of document.elementsFromPoint(x, y) || []) {
         if (el.closest?.(INTERACTIVE_SELECTOR)) return true
       }
-      // 手抖点偏了：附近 10px 内还有控件，也不关
-      for (const el of document.querySelectorAll(INTERACTIVE_SELECTOR)) {
+      // 手抖点偏了：附近 NEAR_PADDING 内还有控件，也不关。只扫对话框内部——
+      // 外面展示板上的卡片再密也不该拖住这个面板，合起来又是一次全文档遍历
+      const own = this.dialogContent()
+      for (const el of own?.querySelectorAll(INTERACTIVE_SELECTOR) || []) {
         const rect = el.getBoundingClientRect()
         if (rect.width === 0 && rect.height === 0) continue
         if (
@@ -805,7 +752,7 @@ this.$nextTick(() => {
       const isSave = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's'
       if (event.key !== 'Escape' && !isSave) return
       // 日期选择器开着时，Esc 只收选择器，面板留着继续编辑；
-      // 选择器里的方向键、回车等不在这里处理，原样放给 Vuetify。
+      // 选择器里的方向键、回车等不在这里处理，原样放给 Vuetify
       if (this.pickerOpen && event.key === 'Escape') {
         this.pickerOpen = false
         event.stopPropagation()
@@ -832,7 +779,7 @@ this.$nextTick(() => {
       if (entries.length) this.$emit('save', entries)
       this.dialogVisible = false
     },
-// 把手工写的预定标记落实到各个日期上，返回被搬进去的日期和它们的新正文。
+    // 把手工写的预定标记落实到各个日期上，返回被搬进去的日期和它们的新正文。
     // 只在完成编辑和翻日期这一刻跑：展示和预览都另有自己的一份解析（buildPreviewPayload），
     // 不去动草稿，所以两者不会互相把对方算好的结果改掉
     async settleReservations() {
@@ -850,62 +797,48 @@ this.$nextTick(() => {
       }
       const entries = []
       for (const [dateString, list] of byDate) {
-        // 空行统一理一遍：开头不留、结尾留一个、不许连着空、每个 # 前面空一个。
-        // 末尾按默认的一份留：appendBlankLines 管的是「这个面板怎么打开的」，
+        // 空行统一理一遍，末尾按默认的一份留：appendBlankLines 管的是「这个面板怎么打开的」，
         // 从「继续添加作业」进来要 2 个是为了在正文末尾另起一份，
         // 跟往目标日追加一段没关系，跟着走就会凭空多出一个空行
         const content = this.padTrailingBlankLines(
-          tidyBlankLines(assembleDayContent(await this.readDayContent(dateString), list)),
+          tidyBlankLines(assembleDayContent(await this.ensureBase(dateString), list)),
           DEFAULT_BLANK_LINES
         )
         // 草稿也得立刻跟上。少了这一步，这次编辑里再翻回那天，
         // loadContent 会因为 drafts 里已经有一份（旧的）就直接返回它，
         // 目标日期看到的还是搬过去之前的样子
         this.drafts[dateString] = content
-        // 交回去写盘的去掉首尾空白，和 changedDrafts 同一个规矩。少了这一步，
-        // 这份带空行的正文会经 switchDate 直接进存档，以后打开那天看到的
-        // 末尾空行就比这里留的多
+        // 交回去写盘的去掉首尾空白，和 changedDrafts 同一个规矩
         entries.push({ dateString, content: content.trim() })
       }
       return entries
     },
-    // 那天已有的正文：这次编辑里翻到过就直接用草稿（别拿存档里旧的覆盖掉），
-    // 没翻到过才去读存档。读过的存进 _baseCache 备着——预览要同步拿这份底稿来算拼装结果，
-    // 等不起 IndexedDB
-    async readDayContent(dateString) {
+    // 那天的底稿：这次编辑里翻到过就用草稿（别拿存档里旧的覆盖掉），没翻到过才读存档。
+    // 读过的把 Promise 本身存下来——预览每敲一个字都要用，存 Promise 既省了重复打存档，
+    // 也让并发调用天然共用同一次读取。readStoredDay 读不出来返回空串、不reject，
+    // 所以下面那句 ??= 就够了
+    async ensureBase(dateString) {
       if (this.drafts[dateString] != null) return this.drafts[dateString]
-      if (this._baseCache[dateString] != null) return this._baseCache[dateString]
-      // 同一天已经在读了就等那一次，别重复打存档
-      if (!this._baseLoads[dateString]) {
-        this._baseLoads[dateString] = this.loadStoredDayContent(dateString).then((content) => {
-          this._baseCache[dateString] = content
-          delete this._baseLoads[dateString]
-          return content
-        })
-      }
-      return this._baseLoads[dateString]
+      this._baseCache[dateString] ??= this.readStoredDay(dateString)
+      return this._baseCache[dateString]
     },
-    async loadStoredDayContent(dateString) {
+    // 存档里那天本子的正文。读进来先去掉首尾空白：存档里本来就该是干净的，
+    // 但旧版本会把面板入口要求的空行一起写进去（见 settleReservations），
+    // 在这儿理掉，末尾的空行才是我们自己按份数留的
+    async readStoredDay(dateString) {
       try {
         const data = await dataProvider.loadData('classworks-data-' + dateString)
-        if (data && data.success !== false) return data.homework?.[this.title]?.content || ''
+        if (data && data.success !== false) return (data.homework?.[this.title]?.content || '').trim()
       } catch (error) {
-        console.error('读取预定日作业失败:', error)
+        console.error('读取作业失败:', error)
       }
       return ''
-    },
-    // 同步取某一天的底稿：翻到过就用草稿，其次用读过的存档，都没有返回 null。
-    // null 的意思是「还不知道」，调用方自己决定是等一等还是先不算
-    peekDayContent(dateString) {
-      if (this.drafts[dateString] != null) return this.drafts[dateString]
-      const cached = this._baseCache[dateString]
-      return cached == null ? null : cached
     },
     // 给展示板的实时预览：日期 -> 正文。每一份都把预定标记解析掉，
     // 搬走的内容拼到目标日那一节后面——和 settleReservations 用同一套拼法，
     // 区别只是结果不落进草稿。所以展示板上看到的是「将会变成什么样」，
     // 而不是已经存了什么
-    buildPreviewPayload() {
+    async buildPreviewPayload() {
       const payload = {}
       // 标记可能来自任何一天，同一个目标日要把各处的块按正文里的先后并起来
       const byDate = new Map()
@@ -917,33 +850,24 @@ this.$nextTick(() => {
           byDate.get(block.dateString).push(block)
         }
       }
-      // 底稿还没读进缓存的目标日先欠着，等读完了再补发一次
-      const missing = []
-      for (const [dateString, list] of byDate) {
-        const base = this.peekDayContent(dateString)
-        if (base == null) {
-          missing.push(dateString)
-          continue
-        }
-        payload[dateString] = this.padTrailingBlankLines(
-          tidyBlankLines(assembleDayContent(base, list)),
-          DEFAULT_BLANK_LINES
-        )
-      }
-      return { payload, missing }
+      await Promise.all(
+        [...byDate].map(async ([dateString, list]) => {
+          const base = await this.ensureBase(dateString)
+          payload[dateString] = this.padTrailingBlankLines(
+            tidyBlankLines(assembleDayContent(base, list)),
+            DEFAULT_BLANK_LINES
+          )
+        })
+      )
+      return payload
     },
-    // 每敲一个字都推一次预览。目标日的存档还没读过时会晚一拍：
-    // 先补读，回来再重算一次
+    // 每敲一个字都推一次预览。等底稿的这几毫秒里正文可能又变了，
+    // 过期的那一轮直接扔掉，交给新一轮
     async pushPreview() {
       const token = ++this._previewToken
-      let result = this.buildPreviewPayload()
-      if (result.missing.length) {
-        await Promise.all(result.missing.map((dateString) => this.readDayContent(dateString)))
-        // 读存档这几毫秒里正文可能又变了，交给新一轮预览，别拿过期结果盖掉它
-        if (token !== this._previewToken) return
-        result = this.buildPreviewPayload()
-      }
-      this.$emit('preview', result.payload)
+      const payload = await this.buildPreviewPayload()
+      if (token !== this._previewToken) return
+      this.$emit('preview', payload)
     },
     // 改动过的日期：正文和读进来时不一致就算改过（首尾空白不算改动）
     changedDrafts() {
@@ -959,36 +883,15 @@ this.$nextTick(() => {
     updateCurrentLine() {
       const textarea = this.getTextarea()
       if (!textarea) return
-      const cursorPosition = textarea.selectionStart
-      const content = this.content
       this.selectedRange = this.readSelectedRange()
-
-      let currentPos = 0
-      const lines = content.split('\n')
-
-      for (let i = 0; i < lines.length; i++) {
-        const lineLength = lines[i].length
-        const totalLength = currentPos + lineLength
-
-        // 循环一定会落到最后一行上，所以正常走不到下面的兜底
-        if (cursorPosition <= totalLength || i === lines.length - 1) {
-          this.currentLine = lines[i]
-          this.currentLineStart = currentPos
-          this.currentLineEnd = totalLength
-          this.caretInLine = Math.max(0, Math.min(cursorPosition - currentPos, lineLength))
-          return
-        }
-
-        currentPos = totalLength + 1 // +1 for the newline character
-      }
-
-      // 只有正文为空时才会走到这里，光标只能落在末尾
-      this.currentLine = ''
-      this.currentLineStart = content.length
-      this.currentLineEnd = content.length
-      this.caretInLine = 0
+      const caret = textarea.selectionStart
+      const { text, start, end } = lineAt(this.content, caret)
+      this.currentLine = text
+      this.currentLineStart = start
+      this.currentLineEnd = end
+      this.caretInLine = Math.max(0, Math.min(caret - start, text.length))
     },
-// 选区变化不一定都有 mouseup/click 配对（拖选中途、键盘扩选、原生工具菜单）。
+    // 选区变化不一定都有 mouseup/click 配对（拖选中途、键盘扩选、原生工具菜单）。
     // 只认焦点在我们这个 textarea 上的情况，页面上别的选区不管
     onDocumentSelectionChange() {
       if (!this.dialogVisible) return
@@ -996,14 +899,14 @@ this.$nextTick(() => {
       this.updateCurrentLine()
     },
     // 点落在选区内部时，浏览器把选区收掉比 mouseup/click 晚一拍，当场读到的还是
-// 旧选区——表现就是「点在选区内第一次没反应、要点第二下」。
-// 所以当场读一遍，再等这一拍过了补读一遍
+    // 旧选区——表现就是「点在选区内第一次没反应、要点第二下」。
+    // 所以当场读一遍，再等这一拍过了补读一遍
     scheduleCurrentLine() {
       this.updateCurrentLine()
       clearTimeout(this._settleTimer)
       this._settleTimer = setTimeout(() => this.updateCurrentLine(), 0)
     },
-// 选中的多行，整行范围是 { start, end }；没选、或者只选了一行，都返回 null。
+    // 选中的多行，整行范围是 { start, end }；没选、或者只选了一行，都返回 null。
     // 只选一行不算多选——单行的走原来那套（#+单行直接改那个 #）
     readSelectedRange() {
       const textarea = this.getTextarea()
@@ -1031,8 +934,8 @@ this.$nextTick(() => {
       const nl = content.indexOf('\n', at)
       return nl < 0 ? content.length : nl
     },
-    // 按钮上显示的字。日期按钮是 { word, date }，别的按钮就是直接一个词，
-    // 词上不带标点——收尾建议那几个词前面的逗号由那一行的 comma 标记现补
+
+    // 按钮上显示的字。日期按钮是 { word, date }，别的按钮就是直接一个词
     chipLabel(chip) {
       return typeof chip === 'string' ? chip : chip.word
     },
@@ -1048,11 +951,9 @@ this.$nextTick(() => {
       return !!chip.date && !!row.lit?.includes(chip.date)
     },
     // 面板上点一个词：只往光标处写这几个字。
-    // 交那一组是整行的收尾，写完补换行；面板停在哪一层由正文自己推（见 phaseOf）
+    // 「作为…的 xx」那一栏点的后果看光标在哪、有没有多选，在 chooseDay 里分派
     tapChip(chip, row) {
       const word = this.chipLabel(chip)
-      // 「作为…的 xx」那一栏：点的后果看光标在哪、有没有多选，
-      // 都在 chooseDay 里分派
       if (row?.reserve) {
         this.chooseDay(word, chip.date)
         return
@@ -1083,14 +984,12 @@ this.$nextTick(() => {
       }
       const ownerStart = headingAboveStart(this.content, this.currentLineStart)
       if (ownerStart < 0) {
-        // 上面没有小标题，这一行本来就是这一天的正文。点当天不动它，
-        // 点别的日子还是老样子挪到那天那一节
+        // 上面没有小标题，这一行本来就是这一天的正文。点当天不动它
         if (!strip) this.insertReservation(day)
         return
       }
       if (headingBlockSize(this.content, ownerStart) <= 1) {
-        // 那天已经有这一节了就并进去，别再开一个同名的。
-        // 点别的日子只在「已经有同一天那一节」时才并，找不到就老老实实改标题
+        // 那天已经有这一节了就并进去，别再开一个同名的
         if (this.mergeSelectedLines(day, strip)) return
         this.retitleOwner(ownerStart, day, strip)
         return
@@ -1116,7 +1015,7 @@ this.$nextTick(() => {
     },
     // 整块选区改日期。选区里有 # 行就只改那些 # 行（正文行、选区外的行、
     // 还有它们各自归着的标题，一个字符都不改）；一个 # 行都没有就整段新起一节
-applySelectedDay(word, strip) {
+    applySelectedDay(word, strip) {
       const range = this.selectedRange
       if (!range) return
       const before = this.content
@@ -1160,7 +1059,7 @@ applySelectedDay(word, strip) {
         this.updateCurrentLine()
       })
     },
-// 把光标这一行并进那天已有的某一节，而不是新起一节。成功返回 true。
+    // 把光标这一行并进那天已有的某一节，而不是新起一节。成功返回 true。
     // 没有可并的地方就返回 false，调用方照原样新起一节
     mergeSelectedLines(day, allowPlain) {
       const target = resolveReserveDay(day, this.todayString)
@@ -1245,11 +1144,10 @@ applySelectedDay(word, strip) {
       )
 
       // 新一节的标题：跟着原来那个标题走，只有「某天的xx」才跟（那天要换掉）；
-// 「# 通知」这种普通标题跟过去就是多一份一模一样的标题，还是用「xx的作业」
+      // 「# 通知」这种普通标题跟过去就是多一份一模一样的标题，还是用「xx的作业」
       const heading = (owner && retargetHeading(owner, day)) || reserveLine(day)
 
-      // 空行统一交给 tidyBlankLines 理：开头不留、结尾留一个、不许连着空、
-      // 每个 # 前面空一个。手工写的标题行也一并按这个理。
+      // 空行统一交给 tidyBlankLines 理，手工写的标题行也一并按这个理。
       // 先理再算插入点：理完偏移才是准的。反过来算的话，原文里那几个多出来的
       // 空行一被收掉，位置全往前挪，光标就落到文末去了
       rest = tidyBlankLines(rest)
@@ -1272,8 +1170,7 @@ applySelectedDay(word, strip) {
         text = head + heading + '\n' + line
         caret = text.length
       }
-      // 已经理过一遍了，这里再理一次是白理——但插入本身可能造出新的空行
-      // （比如新标题前面那一个），留着这一步兜底
+      // 插入本身可能造出新的空行（比如新标题前面那一个），所以最后再兜底理一遍
       text = tidyBlankLines(text)
       this.content = text
       this.$nextTick(() => this.restoreLineCaret(caret))
@@ -1334,6 +1231,8 @@ applySelectedDay(word, strip) {
       this.content = this.content.slice(0, at) + '\n' + this.content.slice(at)
       this.$nextTick(() => this.restoreLineCaret(at + 1))
     },
+    // 改完正文重新定位光标：聚焦 + 落到指定位置 + 把当前行刷新一遍。
+    // DOM 要等 Vue 渲染完才能动，所以调用方一律包在 $nextTick 里
     restoreLineCaret(position) {
       const textarea = this.getTextarea()
       if (!textarea) return
@@ -1360,30 +1259,20 @@ applySelectedDay(word, strip) {
     },
     insertAtCursor(text) {
       if (!text) return
-
       const textarea = this.getTextarea()
       if (!textarea) return
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
-
       // 原生通道：DOM 已经被浏览器改好，input 事件同步把 content 跟上，
       // 光标也已经在插入内容后面，不用再手动挪
       if (this.insertNative(text)) {
         this.updateCurrentLine()
         return
       }
-
       this.content = this.content.slice(0, start) + text + this.content.slice(end)
-
-      this.$nextTick(() => {
-        textarea.focus()
-        const newPosition = start + text.length
-        textarea.setSelectionRange(newPosition, newPosition)
-        this.updateCurrentLine()
-      })
+      this.$nextTick(() => this.restoreLineCaret(start + text.length))
     },
-    // 原生删除，跟 insertText 一个路子：走浏览器自己的通道才留得住撤销记录。
-    // 返回 false 表示走不通，调用方退回字符串拼接
+    // 原生删除，跟 insertText 一个路子。返回 false 表示走不通，调用方退回字符串拼接
     deleteNative() {
       const textarea = this.getTextarea()
       if (!textarea) return false
@@ -1397,36 +1286,16 @@ applySelectedDay(word, strip) {
     deleteLastChar() {
       const textarea = this.getTextarea()
       if (!textarea) return
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-
-      if (start === end) {
-        // 如果没有选中文本，删除光标前一个字符
-        if (start > 0) {
-          if (this.deleteNative()) {
-            this.updateCurrentLine()
-            return
-          }
-          this.content = this.content.slice(0, start - 1) + this.content.slice(start)
-          this.$nextTick(() => {
-            textarea.focus()
-            textarea.setSelectionRange(start - 1, start - 1)
-            this.updateCurrentLine()
-          })
-        }
-      } else {
-        // 如果有选中文本，删除选中部分
-        if (this.deleteNative()) {
-          this.updateCurrentLine()
-          return
-        }
-        this.content = this.content.slice(0, start) + this.content.slice(end)
-        this.$nextTick(() => {
-          textarea.focus()
-          textarea.setSelectionRange(start, start)
-          this.updateCurrentLine()
-        })
+      const { selectionStart: start, selectionEnd: end } = textarea
+      // 没选中文本就删光标前面那一个字，已经贴在最开头就没什么可删的
+      const from = start === end ? start - 1 : start
+      if (from < 0) return
+      if (this.deleteNative()) {
+        this.updateCurrentLine()
+        return
       }
+      this.content = this.content.slice(0, from) + this.content.slice(end)
+      this.$nextTick(() => this.restoreLineCaret(start === end ? from : start))
     },
     // 从剪贴板读取内容并按光标位置组装新正文：有选中则替换，否则在光标处插入
     // 剪贴板完全为空时返回 null，空格或换行视为有效内容原样粘贴
@@ -1448,13 +1317,7 @@ applySelectedDay(word, strip) {
         const result = await this.buildContentWithPaste()
         if (!result) return
         this.content = result.content
-        this.$nextTick(() => {
-          const textarea = this.getTextarea()
-          if (!textarea) return
-          textarea.focus()
-          textarea.setSelectionRange(result.cursorPosition, result.cursorPosition)
-          this.updateCurrentLine()
-        })
+        this.$nextTick(() => this.restoreLineCaret(result.cursorPosition))
       } catch (error) {
         console.error('Failed to read clipboard:', error)
       }
@@ -1477,7 +1340,7 @@ applySelectedDay(word, strip) {
 </script>
 
 <style scoped>
-/* 顶部倒计条：贴在卡片顶边的一条细线，5s 内不走完就自动关掉面板。
+/* 顶部倒计条：贴在卡片顶边的一条细线，倒计走完就自动关掉面板。
    颜色取 currentColor 再压到很低的透明度，深色下是浅灰、浅色下是深灰，不抢注意力 */
 .close-countdown {
   position: absolute;
@@ -1548,7 +1411,7 @@ applySelectedDay(word, strip) {
   margin-top: 6px;
 }
 
-/* 附加科目按钮区：小标题沿用日期小标题的外观，两者都是「往正文里加东西」 */
+/* 附加科目按钮区：小标题沿用日期小标题的外观 */
 .extra-subjects-caption {
   font-size: 0.8rem;
   opacity: 0.6;
@@ -1586,8 +1449,8 @@ applySelectedDay(word, strip) {
   min-width: 0;
 }
 
-/* 一组词。组内自己也折行，「明天上课对答案」这种长句才不会被挤出面板。
-   组只是折行的单位，不表示分组——所有按钮的间距一样，靠 chip 自己的 ma-1 */
+/* 一组词。组只是折行的单位，不表示分组——所有按钮的间距一样，靠 chip 自己的 ma-1。
+   组内自己也折行，「明天上课对答案」这种长句才不会被挤出面板 */
 .phrase-group {
   display: flex;
   flex-wrap: wrap;
@@ -1617,7 +1480,6 @@ applySelectedDay(word, strip) {
   padding-left: 12px;
 }
 
-/* 组与组之间只留一点空隙。不用竖线，竖线既丑又抢眼 */
 :deep(.v-chip) {
   cursor: pointer;
   user-select: none;
@@ -1638,9 +1500,8 @@ applySelectedDay(word, strip) {
   gap: var(--key-gap);
 }
 
-/* 小键盘整列：每一行都是同一个三列网格，按钮尺寸只由网格决定。
-   之前换行/空格那两个键上写了 width:100%，把 flex:1 盖掉了，同一行里
-   三个键就三个宽度——现在没有按钮再自带宽度，加减按钮也不会跑偏 */
+/* 小键盘整列：每一行都是同一个三列网格，按钮尺寸只由网格决定，
+   所以没有任何按钮自带宽度 */
 .keypad-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1664,8 +1525,8 @@ applySelectedDay(word, strip) {
   visibility: hidden;
 }
 
-/* 量词那一排。自己一行、均分整行，不跟上面那个三列网格对齐——
-   五个键本来也对不上三列，硬凑只会让键宽一会儿宽一会儿窄 */
+/* 量词那一排。五个键对不上三列，所以自己一行、均分整行，
+   硬凑进上面那个网格只会让键宽一会儿宽一会儿窄 */
 .measure-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

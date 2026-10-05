@@ -278,8 +278,6 @@ export default {
       for (const segment of item.segments || []) {
         const date = segment.label || ''
         for (const para of this.parseParagraphs(segment.content)) {
-          // 只有小标题、没有正文时，小标题降级成普通正文，这里不会出现空块
-          if (!para.lines.length) continue
           blocks.push({
             date,
             custom: para.heading,

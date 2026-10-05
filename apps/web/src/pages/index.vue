@@ -357,8 +357,8 @@ export default {
     },
 
     // 某一天某个科目的预览正文。没有这一天的预览就返回 null，调用方据此回落到存档。
-    // 用 in 而不是真值判断：正文被删空时预览也是空串，那也得算数——
-    // 不然「删干净了」在展示板上根本看不出来
+    // 用 in 而不是真值判断：正文被删空时预览值是空串，那也得算数——
+    // 不然就会回落到存档里那份旧内容，把刚删掉的又显示出来
     previewContent(dateString, subjectName) {
       const day = this.state.preview[dateString]
       if (!day || !(subjectName in day)) return null
@@ -371,13 +371,15 @@ export default {
       const segments = []
       const own = this.previewContent(this.state.dateString, subjectName)
       const currentContent = own != null ? own : this.state.boardData.homework[subjectName]?.content
-      if (currentContent) {
+      // 空白不算有作业：正文只剩空格和空行时展示板会出一张没有内容的空卡片。
+      // 口径和 storedSubjectNames 一致（那边用的是 trim）
+      if (currentContent?.trim()) {
         segments.push({ label: null, content: currentContent })
       }
       for (const day of this.laterDays) {
         const own = this.previewContent(day.dateString, subjectName)
         const content = own != null ? own : day.homework?.[subjectName]?.content
-        if (content) {
+        if (content?.trim()) {
           segments.push({ label: this.dayName(day.dateString), content })
         }
       }
@@ -393,8 +395,11 @@ export default {
         payload = this.state.boardData
       } else {
         day = this.state.otherDays.find((d) => d.dateString === dateString)
-        // 新建的日期若最终没有任何内容就不落盘
-        if (!day || (day.pendingCreate && !Object.keys(day.homework).length)) return
+        // 新建的日期若最终没有任何内容就不落盘。正文被删空的条目也不算内容，
+        // 不然存档里会留下一个空壳条目
+        const blank = (homework) =>
+          !Object.values(homework || {}).some((data) => data?.content?.trim())
+        if (!day || (day.pendingCreate && blank(day.homework))) return
         payload = { homework: day.homework }
       }
       this.pendingSaves.add(dateString)
