@@ -61,7 +61,7 @@
   <homework-edit-dialog
     v-model="state.dialogVisible"
     :title="currentEditSubject"
-    :initial-date="state.dateString"
+    :initial-date="state.editDate"
     :append-blank-lines="state.editAppendBlankLines"
     :extra-subjects="currentEditExtraSubjects"
     @save="handleHomeworkSave"
@@ -103,6 +103,9 @@ export default {
         // 本次打开编辑面板要在正文末尾留几个空行：普通入口 1，
         // 从「继续添加作业」卡片进来 2，好和已有内容隔开另起一份
         editAppendBlankLines: 1,
+        // 本次打开编辑面板停在哪一天。卡片上点的是哪一天就进哪一天，
+        // 没给（点科目名那个标题区）就跟着展示板正在看的那天
+        editDate: '',
         fontSize: getSetting('font.size'),
         contentStyle: { 'font-size': `${getSetting('font.size')}px` },
         selectedDateObj: new Date(),
@@ -121,6 +124,9 @@ export default {
   created() {
     // 正在写盘的日期，避免同一天并发写
     this.pendingSaves = new Set()
+    // 确认读到过存档的日期。删空记录前必须先在册——
+    // 读失败时内存里的作业是空的，不确认就删会把没读出来的内容一起抹掉
+    this.storedDates = new Set()
   },
 
   computed: {
@@ -264,13 +270,17 @@ export default {
     async loadDayData() {
       const response = await dataProvider.loadData('classworks-data-' + this.state.dateString)
       if (response && response.success === false) {
+        // NOT_FOUND 是压根没记录，读失败则是未知状态，两种都不记进 storedDates；
+        // 在册的只在明确 NOT_FOUND 时才撤（比如记录已被删过）
+        if (response.error?.code === 'NOT_FOUND') this.storedDates.delete(this.state.dateString)
+        this.state.boardData = { homework: {} }
+      } else if (Array.isArray(response)) {
+        // 旧版数组格式：内容认不出来，别记在册——不然会被当成空记录删掉
         this.state.boardData = { homework: {} }
       } else {
+        this.storedDates.add(this.state.dateString)
         this.state.boardData = {
           homework: response.homework || response || {},
-        }
-        if (Array.isArray(response)) {
-          this.state.boardData = { homework: {} }
         }
       }
       await this.loadOtherDays()
@@ -298,6 +308,8 @@ export default {
         for (const ds of dates) {
           const data = await dataProvider.loadData(`classworks-data-${ds}`)
           if (!data || data.success === false) continue
+          // 旧版数组格式同样不记在册，见 loadDayData 里的说明
+          if (!Array.isArray(data)) this.storedDates.add(ds)
           days.push({ dateString: ds, homework: data.homework || {} })
         }
         this.state.otherDays = days
@@ -314,7 +326,7 @@ export default {
       if (dateString === this.state.dateString) return this.state.boardData.homework
       let day = this.state.otherDays.find((d) => d.dateString === dateString)
       if (!day) {
-        this.state.otherDays.push({ dateString, homework: {}, pendingCreate: true })
+        this.state.otherDays.push({ dateString, homework: {} })
         this.state.otherDays.sort((a, b) => a.dateString.localeCompare(b.dateString))
         // 从数组里重新取一次，拿的是响应式代理：直接往 push 进去的原始对象上写，
         // 展示板收不到通知，新加的这一天会等到下次刷新才冒出来
@@ -324,13 +336,16 @@ export default {
       return day.homework
     },
 
-    // 把某一天的存档读进缓存；这天本来就没有作业就留空，等于 pendingCreate
+    // 把某一天的存档读进缓存；这天本来就没有作业就留空
     async loadOtherDay(day) {
       try {
         const data = await dataProvider.loadData('classworks-data-' + day.dateString)
         if (!data || data.success === false || Array.isArray(data)) return
         const homework = data.homework || data
-        if (homework && typeof homework === 'object') day.homework = homework
+        if (homework && typeof homework === 'object') {
+          day.homework = homework
+          this.storedDates.add(day.dateString)
+        }
       } catch (error) {
         console.warn('读取作业失败:', error)
       }
@@ -365,7 +380,8 @@ export default {
       return day[subjectName]
     },
 
-    // 同一科目的作业分块：当日在前，后续日期按日期升序，分隔线由渲染层处理
+    // 同一科目的作业分块：当日在前，后续日期按日期升序，分隔线由渲染层处理。
+    // 每块都带着 dateString，卡片区靠它分出「点哪块进哪一天」的可点范围
     // 正文内部用空行分段、用「# 标题」分段，详见 HomeworkGrid 的解析
     buildSegments(subjectName) {
       const segments = []
@@ -374,18 +390,30 @@ export default {
       // 空白不算有作业：正文只剩空格和空行时展示板会出一张没有内容的空卡片。
       // 口径和 storedSubjectNames 一致（那边用的是 trim）
       if (currentContent?.trim()) {
-        segments.push({ label: null, content: currentContent })
+        segments.push({
+          dateString: this.state.dateString,
+          label: null,
+          content: currentContent,
+        })
       }
       for (const day of this.laterDays) {
         const own = this.previewContent(day.dateString, subjectName)
         const content = own != null ? own : day.homework?.[subjectName]?.content
         if (content?.trim()) {
-          segments.push({ label: this.dayName(day.dateString), content })
+          segments.push({
+            dateString: day.dateString,
+            label: this.dayName(day.dateString),
+            content,
+          })
         }
       }
       return segments
     },
 
+    // 落盘一天，顺手清掉空壳：content 为空的科目条目直接从这天删掉，
+    // 一门都不剩就把整条记录删掉（只动这一次改到的那天，不全量扫历史）。
+    // 删之前要 storedDates 确认过这天的存档真的读到过——
+    // 读失败时 homework 是空的，照删会把没读出来的内容一起抹掉
     async saveDayData(dateString = this.state.dateString) {
       // 同一份数据不并发写，重复的保存直接跳过
       if (this.pendingSaves.has(dateString)) return
@@ -395,18 +423,25 @@ export default {
         payload = this.state.boardData
       } else {
         day = this.state.otherDays.find((d) => d.dateString === dateString)
-        // 新建的日期若最终没有任何内容就不落盘。正文被删空的条目也不算内容，
-        // 不然存档里会留下一个空壳条目
-        const blank = (homework) =>
-          !Object.values(homework || {}).some((data) => data?.content?.trim())
-        if (!day || (day.pendingCreate && blank(day.homework))) return
+        if (!day) return
         payload = { homework: day.homework }
+      }
+      // 清空的科目不留条目。直接在原对象上删，内存和落盘用的是同一份
+      for (const [name, data] of Object.entries(payload.homework)) {
+        if (!data?.content?.trim()) delete payload.homework[name]
       }
       this.pendingSaves.add(dateString)
       try {
-        const response = await dataProvider.saveData('classworks-data-' + dateString, payload)
-        if (response && response.success === false) throw new Error(response.error.message)
-        if (day) day.pendingCreate = false
+        if (Object.keys(payload.homework).length) {
+          const response = await dataProvider.saveData('classworks-data-' + dateString, payload)
+          if (response && response.success === false) throw new Error(response.error.message)
+          this.storedDates.add(dateString)
+        } else if (this.storedDates.has(dateString)) {
+          // 这天一门作业都不剩：记录删掉，不留空壳
+          const response = await dataProvider.deleteData('classworks-data-' + dateString)
+          if (response && response.success === false) throw new Error(response.error.message)
+          this.storedDates.delete(dateString)
+        }
         // 保存成功不提示，静默保存
       } catch (error) {
         this.$message.error('保存失败', error.message || '请重试')
@@ -427,11 +462,13 @@ export default {
       }
     },
 
-    // 编辑入口，key 就是科目名；对话框初始停在展示板正在看的那天，可自行前后翻日期。
+    // 编辑入口，key 就是科目名；对话框初始停在哪一天由 options.date 给：
+    // 卡片上点的是哪一天就进哪一天，没给就跟着展示板正在看的那天（点标题区走这条）。
     // appendBlankLines 由卡片决定：底部「继续添加作业」进来要 2 个空行，其余 1 个
     openDialog(key, options = {}) {
       this.currentEditSubject = key
       this.state.editAppendBlankLines = options.appendBlankLines || 1
+      this.state.editDate = options.date || this.state.dateString
       this.state.dialogVisible = true
     },
 

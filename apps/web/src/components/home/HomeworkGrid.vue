@@ -17,24 +17,38 @@
             rounded="md"
             @click="$emit('open-dialog', item.key)"
           >
-            <!-- 科目名独占一行，小标题按段落正常单独显示 -->
+            <!-- 科目名独占一行，小标题按段落正常单独显示。
+                 这一行没有自己的点击处理，冒泡到卡片上：不带日期进编辑面板，
+                 也就是跟着展示板正在看的那天（正常情况下就是今天） -->
             <v-card-title class="hw-card-title" :style="contentStyle">
               {{ item.name }}
             </v-card-title>
             <v-card-text :style="contentStyle" class="hw-card-text">
-              <template v-for="(block, bi) in buildBlocks(item)" :key="bi">
-                <v-divider v-if="bi > 0" class="hw-divider" />
-                <div v-if="hasLabel(block)" class="segment-label">
-                  <span class="label-date">{{ block.date }}</span>
-                  <span class="label-de">{{ block.date ? '的' : '' }}</span>
-                  <span class="label-name">{{ block.name }}</span>
-                </div>
-                <div class="hw-paragraph">
-                  <div v-for="(text, ti) in block.lines" :key="ti" class="hw-line">
-                    {{ text }}
+              <!-- 一天一区：同一天的那几段（正文按空行、小标题分的段）和它们之间的
+                   分隔线都算在这一区里，点哪儿都进那一天。跨天的那条分隔线归新的一天，
+                   不然点它会掉到卡片上、进今天。区外的卡片留白仍旧冒泡给卡片 -->
+              <div
+                v-for="(day, di) in buildDays(item)"
+                :key="di"
+                class="hw-day"
+                @click.stop="openDay(item, day)"
+              >
+                <template v-for="(block, bi) in day.blocks" :key="bi">
+                  <v-divider v-if="di > 0 || bi > 0" class="hw-divider" />
+                  <!-- 日期有、或者这段有自定义小标题，就出小标题：后面的日子光有正文也是要出
+                       「明天的作业」的，别因为没有自定义小标题就把它吞了 -->
+                  <div v-if="day.date || block.custom" class="segment-label">
+                    <span class="label-date">{{ day.date }}</span>
+                    <span class="label-de">{{ day.date ? '的' : '' }}</span>
+                    <span class="label-name">{{ block.name }}</span>
                   </div>
-                </div>
-              </template>
+                  <div class="hw-paragraph">
+                    <div v-for="(text, ti) in block.lines" :key="ti" class="hw-line">
+                      {{ text }}
+                    </div>
+                  </div>
+                </template>
+              </div>
             </v-card-text>
           </v-card>
         </div>
@@ -185,6 +199,13 @@ export default {
       })
     },
 
+    // 点卡片上某一天的那一块：直接进那一天，不用先进今天再自己往前翻。
+    // 卡片冒泡上来的那次点击（标题区、卡片留白）不带日期，走的是另一条路
+    openDay(item, day) {
+      if (!day?.dateString) return
+      this.$emit('open-dialog', item.key, { date: day.dateString })
+    },
+
     // 该科目在展示板上已经有内容卡片了没有：用来区分「点击添加作业」和「继续添加作业」
     hasContent(name) {
       return this.sortedItems.some((item) => item.key === name)
@@ -266,27 +287,28 @@ export default {
         this.layoutVersion++
       }
     },
-    // 自定义小标题和日期只要有一个就有小标题；都没有时只留分割线
-    hasLabel(block) {
-      return !!(block && (block.custom || block.date))
-    },
-    // 一张卡片的全部内容块：每天的正文按空行拆段，每段配一个小标题。
-    // 有自定义小标题就是「日期的 + 自定义小标题」，没有则是「日期的作业」，
+    // 一张卡片按天分块：一天一块，块里是那天的正文按空行和小标题分的几段。
+    // 每段有自定义小标题就是「日期的 + 自定义小标题」，没有就是「日期的作业」，
     // 当天又没有自定义小标题时不出小标题，只留分割线。
-    buildBlocks(item) {
-      const blocks = []
+    // 一天一块（不是一段一块）是渲染层划点击区的依据：同一天的几段，
+    // 连同分隔它们的线，点哪儿都该进那一天
+    buildDays(item) {
+      const days = []
       for (const segment of item.segments || []) {
-        const date = segment.label || ''
-        for (const para of this.parseParagraphs(segment.content)) {
-          blocks.push({
-            date,
-            custom: para.heading,
-            name: para.heading || '作业',
-            lines: para.lines,
-          })
-        }
+        const blocks = this.parseParagraphs(segment.content).map((para) => ({
+          custom: para.heading,
+          name: para.heading || '作业',
+          lines: para.lines,
+        }))
+        // 空的段（比如正文只剩空行）不占一块
+        if (!blocks.length) continue
+        days.push({
+          date: segment.label || '',
+          dateString: segment.dateString,
+          blocks,
+        })
       }
-      return blocks
+      return days
     },
 // 正文按空行分段：一行空行即分割线，连续空行按一段处理；
     // 段落首行形如「# 标题」时，剥掉前缀当作该段的小标题

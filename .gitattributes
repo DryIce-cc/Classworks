@@ -1,0 +1,22 @@
+# 统一换行符：仓库里一律 LF，checkout 时也写成 LF。
+# 这是唯一能同时管住 commit 和 checkout 两头的机制，.editorconfig 只管编辑器那一头。
+* text=auto eol=lf
+
+# 二进制必须显式排除，否则 text=auto 会按文本处理、换行转换会把它们改坏。
+# .svg 是文本，别列进来——它正需要跟着上面那条统一成 LF。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.avif binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.wasm binary

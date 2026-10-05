@@ -1,0 +1,86 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+dev-dist/
+**/dist/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Local env files
+.env
+.env.local
+.env.*.local
+**/.env.local
+**/.env.*.local
+
+# Editor / IDE directories
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.vscode-test/
+
+# Cache
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+.rpt2_cache/
+.tern-port
+.fusebox/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn v2 / pnp
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Vite temp files
+vite.config.*.timestamp-*.mjs
+*.timestamp-*
+
+# Auto-generated declaration files
+auto-imports.d.ts
+components.d.ts
+typed-router.d.ts
+
+# Package lock files (using pnpm)
+package-lock.json
+**/package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+/.trae

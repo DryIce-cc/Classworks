@@ -42,6 +42,17 @@ export default {
     }
   },
 
+  // 删掉整个键。某天一门作业都不剩时用，免得存档里留空壳记录
+  async deleteData(key) {
+    try {
+      const db = await initDB()
+      await db.delete('kv', key)
+      return true
+    } catch (error) {
+      return formatError('删除本地数据失败：' + error)
+    }
+  },
+
   // 列出存档名。调用方要多少给多少（受 limit 限制）
   async loadKeys({ limit = 100 } = {}) {
     try {

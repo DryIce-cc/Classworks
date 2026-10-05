@@ -1,0 +1,17 @@
+root = true
+
+# 换行符统一 LF。放 [*] 覆盖所有文本文件——只写在某个子块里，
+# scss/yaml/json/html 就没人管，这正是原来那个版本漏掉它们的原因
+[*]
+end_of_line = lf
+
+[*.{js,jsx,ts,tsx,vue}]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{json,yml,yaml,scss,css,html,mjs,md}]
+indent_style = space
+indent_size = 2
+insert_final_newline = true
