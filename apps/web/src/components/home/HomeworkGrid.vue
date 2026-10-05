@@ -97,10 +97,9 @@
 const MAX_COLUMNS = 3
 // 「点击添加作业」卡片露在视野里又没人理，3s 后就把它上滑出去
 const IDLE_SCROLL_DELAY = 3000
-// 小标题行：# 开头，后面最多一个空格（可有可无）。
-// 多个空格就不算小标题，当普通正文渲染——与其把多余的空格留在标题里，
-// 不如老老实实当它不是标题
-const HEADING_PATTERN = /^#([ 　]?)([^ 　].*)$/
+// 标题行：与文本层（homeworkText.js 的 isHeadingLine）同口径，
+// 行首允许空格/Tab 缩进，# 开头即标题，不再限空格个数、不限有无正文
+const HEADING_LINE = /^[ \t]*[#]/
 
 export default {
   name: 'HomeworkGrid',
@@ -438,17 +437,17 @@ export default {
         this.layoutVersion++
       }
     },
-    // 一张卡片按天分块：一天一块，块里是那天的正文按空行和小标题分的几段。
-    // 每段有自定义小标题就是「日期的 + 自定义小标题」，没有就是「日期的作业」，
-    // 当天又没有自定义小标题时不出小标题，只留分割线。
+    // 一张卡片按天分块：一天一块，块里是那天的正文按空行和标题行分的几段。
+    // 每段有标题行就是「日期的 + 标题名」，没有就是「日期的作业」，
+    // 当天又没有标题行时不出小标题，只留分割线。
     // 一天一块（不是一段一块）是渲染层划点击区的依据：同一天的几段，
     // 连同分隔它们的线，点哪儿都该进那一天
     buildDays(item) {
       const days = []
       for (const segment of item.segments || []) {
         const blocks = this.parseParagraphs(segment.content).map((para) => ({
-          custom: para.heading,
-          name: para.heading || '作业',
+          custom: para.heading !== null,
+          name: para.heading !== null ? para.heading : '作业',
           lines: para.lines,
         }))
         // 空的段（比如正文只剩空行）不占一块
@@ -461,38 +460,35 @@ export default {
       }
       return days
     },
-// 正文按空行分段：一行空行即分割线，连续空行按一段处理；
-    // 段落首行形如「# 标题」时，剥掉前缀当作该段的小标题
+// 正文分段：空行断段，标题行永远另起一段（前面有没有空行都一样）。
+// 标题行剥掉行首缩进和 #、两头去空格，剩下的就是标题名；
+// 它下面到空行或下一个标题行为止的正文都归它，没有正文也算一段，
+// 渲染成只有小标题的空段
     parseParagraphs(content) {
       if (content == null) return []
-      const blocks = []
-      let block = null
+      const paras = []
+      let current = null
+      const push = () => {
+        if (current && (current.heading !== null || current.lines.length)) {
+          paras.push(current)
+        }
+        current = null
+      }
       for (const raw of String(content).replace(/\r\n?/g, '\n').split('\n')) {
         if (raw.trim() === '') {
-          if (block) {
-            blocks.push(block)
-            block = null
-          }
+          push()
           continue
         }
-        if (!block) block = []
-        block.push(raw)
+        if (HEADING_LINE.test(raw)) {
+          push()
+          current = { heading: raw.replace(/^[ \t]*#+/, '').trim(), lines: [] }
+          continue
+        }
+        if (!current) current = { heading: null, lines: [] }
+        current.lines.push(raw)
       }
-      if (block) blocks.push(block)
-
-      return blocks.map((lines) => {
-        const heading = HEADING_PATTERN.exec(lines[0])
-        // 没写标题（「# 通知」不算）或者整行只有「#」：都当普通正文
-        if (!heading) return { heading: '', lines }
-
-        const rest = lines.slice(1)
-        // 标题就是这一整行，后面没有正文：连「#」原文一起当正文渲染
-        if (!rest.length) return { heading: '', lines: [lines[0]] }
-
-        // 正则里第 1 组是那个可有可无的空格、第 2 组才是标题本体，
-        // 不用再单独 replace 掉空格
-        return { heading: heading[2], lines: rest }
-      })
+      push()
+      return paras
     },
   },
 }
