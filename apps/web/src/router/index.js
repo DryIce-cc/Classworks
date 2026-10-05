@@ -10,6 +10,7 @@ import { setupLayouts } from 'virtual:generated-layouts'
 import { routes } from 'vue-router/auto-routes'
 
 const router = createRouter({
+  // 根目录部署，history 模式干净 URL（/settings），不再用 hash
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: setupLayouts(routes),
 })

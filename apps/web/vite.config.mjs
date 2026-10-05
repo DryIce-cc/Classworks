@@ -14,11 +14,10 @@ import { fileURLToPath, URL } from 'node:url'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  base: './',
+export default defineConfig(({ command }) => ({
+  base: '/',
   plugins: [
     VueRouter(),
-    vueDevTools(),
     Layouts(),
     Vue({
       template: { transformAssetUrls },
@@ -115,30 +114,15 @@ export default defineConfig({
         dir: 'ltr',
         display: 'standalone',
         display_override: ['window-controls-overlay', 'standalone', 'minimal-ui', 'fullscreen'],
-        start_url: './',
-        scope: './',
+        start_url: '/',
+        scope: '/',
         orientation: 'any',
         categories: ['education', 'productivity', 'utilities'],
         prefer_related_applications: false,
         launch_handler: {
           client_mode: 'navigate-existing',
         },
-        file_handlers: [
-          {
-            action: './?file-handler=true',
-            accept: {
-              'application/octet-stream': ['.csb', '.csi'],
-              'application/x-classworks-backup': ['.csb'],
-              'application/x-classworks-install': ['.csi'],
-            },
-          },
-        ],
-        protocol_handlers: [
-          {
-            protocol: 'cs',
-            url: './?protocol=%s',
-          },
-        ],
+        // file_handlers / protocol_handlers 已删：声明了但代码零实现（无 launchQueue），先不挂
         icons: [
           {
             src: './pwa/image/pwa-64x64.png',
@@ -166,7 +150,7 @@ export default defineConfig({
           {
             name: '设置',
             short_name: '设置',
-            url: './settings',
+            url: '/settings',
             icons: [
               {
                 src: './pwa/image/pwa-64x64.png',
@@ -239,4 +223,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

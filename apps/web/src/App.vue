@@ -10,15 +10,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
-import { useTheme } from 'vuetify'
-
-const theme = useTheme()
-
-onMounted(() => {
-  // 一律使用深色主题
-  theme.global.name.value = 'dark'
-})
+// 深色主题只在 plugins/vuetify.js 里定（defaultTheme: 'dark'），这里不再重复强制
 </script>
 <style>
 @import '@/styles/index.scss';

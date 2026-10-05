@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @classworks/web run dev",
-    "dev:web": "pnpm --filter @classworks/web run dev",
+    "build": "pnpm --filter @classworks/web run build",
     "build:web": "pnpm --filter @classworks/web run build",
-    "install:all": "pnpm install"
+    "preview": "pnpm --filter @classworks/web run preview",
+    "pwa:validate": "pnpm --filter @classworks/web run pwa:validate"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {

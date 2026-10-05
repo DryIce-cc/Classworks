@@ -1,7 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const distDir = path.resolve('dist')
+// 基于脚本位置定位 dist，不依赖 CWD（根目录跑 pwa:validate 也能找到）
+const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+const distDir = path.resolve(scriptDir, '..', 'dist')
 const manifestPath = path.join(distDir, 'manifest.webmanifest')
 const indexPath = path.join(distDir, 'index.html')
 const serviceWorkerPath = path.join(distDir, 'sw.js')
@@ -80,21 +83,26 @@ if (!manifest) {
     fail('manifest 缺少 categories，Microsoft Store/PWABuilder 会降低质量评分。')
   }
 
+  // file_handlers / protocol_handlers 为可选：声明了才校验，不声明不报错
   const fileHandlers = Array.isArray(manifest.file_handlers) ? manifest.file_handlers : []
-  const fileExtensions = new Set(
-    fileHandlers.flatMap((handler) => Object.values(handler.accept || {}).flat()),
-  )
-  if (!fileExtensions.has('.csb') || !fileExtensions.has('.csi')) {
-    fail('manifest.file_handlers 必须允许 .csb 和 .csi。')
+  if (fileHandlers.length > 0) {
+    const fileExtensions = new Set(
+      fileHandlers.flatMap((handler) => Object.values(handler.accept || {}).flat()),
+    )
+    if (!fileExtensions.has('.csb') || !fileExtensions.has('.csi')) {
+      fail('manifest.file_handlers 既然声明了，就必须允许 .csb 和 .csi。')
+    }
   }
 
   const protocolHandlers = Array.isArray(manifest.protocol_handlers)
     ? manifest.protocol_handlers
     : []
-  if (
-    !protocolHandlers.some((handler) => handler.protocol === 'cs' && handler.url?.includes('%s'))
-  ) {
-    fail('manifest.protocol_handlers 必须声明 cs:// 协议处理。')
+  if (protocolHandlers.length > 0) {
+    if (
+      !protocolHandlers.some((handler) => handler.url?.includes('%s'))
+    ) {
+      fail('manifest.protocol_handlers 既然声明了，url 必须包含 %s。')
+    }
   }
 
   if (manifest.edge_side_panel) {
