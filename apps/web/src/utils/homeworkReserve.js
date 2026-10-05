@@ -30,7 +30,7 @@ const DAY_ONLY = DAY_PATTERN + '[ 　]?[：:]?[ 　]?'
 //   「的」后面是别的（当作小标题）→ 搬过去后在那天写成「#标题」+ 内容
 //   「的」和「：」后面什么都没有 → 也是预定，只是不给它起目标标题
 // 和渲染层的小标题一个规矩：# 开头，后面最多一个空格（可有可无）。
-// 多个空格就不算标记，当普通正文——省得专门去保留空格。
+// 的/：和标题之间多写几个空格也照认，下面 trim 掉，不留进标题里
 // DAY_PATTERN 自带一组括号，这里不要再套——套了捕获组就错位，
 // matched[1] 是日子词、matched[2] 才是「的」后面那段标题
 const RESERVE_PATTERN = new RegExp(
@@ -176,13 +176,12 @@ export function retargetScopeHeading(line, word, strip) {
   return retargetDayHeading(line, word, strip)
 }
 
-// 这一行是预定标记就返回 { word, heading }，不是就返回 null
+// 这一行是预定标记就返回 { word, heading }，不是就返回 null。
+// 的/：和标题之间有几个空格一律忽略（下面 trim 掉）：多写空格只是手抖，
+// 不能因此整行不算标记
 export function parseReserveLine(line) {
   const matched = RESERVE_PATTERN.exec(line)
   if (!matched) return null
-  // 「的」后面多了空格就整个不算：正则里那处只容一个空格，多出来的会被
-  // 吞进标题。与其把空格留着，不如当它不是标记
-  if (/^[ 　]/.test(matched[2])) return null
   const title = matched[2].trim()
   return { word: matched[1], heading: /^作业[：:]?$/.test(title) ? '' : title }
 }

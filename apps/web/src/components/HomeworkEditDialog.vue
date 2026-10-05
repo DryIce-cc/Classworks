@@ -369,6 +369,53 @@ function dropHeadingLine(content, ownerStart) {
   return { text: tidyBlankLines(head + gap + rest), caretAt: (head + gap).length }
 }
 
+// 编辑框高亮：textarea 里只能放纯文本，上色靠垫在它底下的同尺寸 div。
+// 灰 `#` 行、黄日期词只改颜色，不改字重字号，换行位置才和原文对得上
+function escapeHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// 预定解析认的那个前缀（缩进 + # + 最多一个半角/全角空格），日期词紧跟在它后面
+const HIGHLIGHT_PREFIX = /^[ \t]*#[ 　]?/
+
+// 抄给高亮层的排版属性：缺一个，两边的换行/字宽就可能对不上。
+// 错位平时看不见（textarea 的字是透明的），只有选区底色按 textarea 排版
+// 画出来、跟底下那层字一比才露馅；英文长串对折行最敏感，所以英文错位最重。
+// 全写在 backdrop 上，.hl-line 靠继承拿到，不在 CSS 里手写 assumed 值
+const HIGHLIGHT_TEXT_PROPS = [
+  'fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize',
+  'lineHeight', 'fontFamily', 'fontKerning', 'fontFeatureSettings',
+  'fontOpticalSizing', 'fontVariantLigatures', 'fontVariantCaps',
+  'fontVariantNumeric', 'fontVariantEastAsian', 'letterSpacing',
+  'wordSpacing', 'textIndent', 'textTransform', 'tabSize', 'direction',
+  'whiteSpace', 'wordBreak', 'overflowWrap', 'textRendering', 'textSizeAdjust',
+]
+
+function buildHighlightHtml(content) {
+  return String(content ?? '').split('\n').map((line) => {
+    let inner = escapeHtml(line)
+    if (isHeadingLine(line)) {
+      const parsed = parseReserveLine(line)
+      const prefix = (HIGHLIGHT_PREFIX.exec(line) || [])[0] || ''
+      if (parsed && line.startsWith(parsed.word, prefix.length)) {
+        // 日期词后面那个「的」（「明天的作业」）也算日期的一部分，一起刷黄；
+        // 它前面可能有个空格，一并吞掉（空格刷不刷看不见，无所谓）
+        const afterWord = line.slice(prefix.length + parsed.word.length)
+        const particle = (/^[ 　]?的/.exec(afterWord) || [])[0] || ''
+        const rest = afterWord.slice(particle.length)
+        // 颜色自定义（hl-head / hl-date），起步取「今天的作业」那对色再按要求微调
+        inner =
+          `<span class="hl-head">${escapeHtml(prefix)}</span>` +
+          `<span class="hl-date">${escapeHtml(parsed.word + particle)}</span>` +
+          `<span class="hl-head">${escapeHtml(rest)}</span>`
+      } else {
+        inner = `<span class="hl-head">${inner}</span>`
+      }
+    }
+    return `<div class="hl-line">${inner || '<br>'}</div>`
+  }).join('')
+}
+
 export default {
   name: 'HomeworkEditDialog',
   props: {
@@ -437,6 +484,15 @@ export default {
     this._baseCache = {}
     // 预览的世代号：读存档是异步的，回来时正文可能又变了，过期的那份直接扔掉
     this._previewToken = 0
+    // 高亮底层那套：当前垫着的 textarea 和高亮 div（对话框重建时元素会换），
+    // 以及上次抄几何时的宽度，变了才重抄。
+    // _hlRO 盯着 textarea 的尺寸：auto-grow 改完高度就重对，不用猜时序
+    this._hlTextarea = null
+    this._hlBackdrop = null
+    this._hlWidth = 0
+    // rAF 合并调度的 id：一帧里不管触发多少次，只重画一遍
+    this._hlRaf = 0
+    this._hlRO = new ResizeObserver(() => this.scheduleHighlightSync())
   },
   mounted() {
     // 用捕获阶段监听，按钮、浮层挡在前面也照样能收到
@@ -457,6 +513,12 @@ export default {
     // Esc / Ctrl+S 挂 document 捕获阶段，不挂卡片：点了卡片里不可聚焦的地方
     // （正文、推荐面板的空白）焦点会掉回 body，这时卡片上的 @keydown 收不到按键
     document.addEventListener('keydown', this.handleKeydown, true)
+    // 窗口缩放会改变编辑框宽度，高亮底层的几何要跟着重抄
+    window.addEventListener('resize', this.onHighlightResize)
+    // 字体后加载会改变换行位置，加载完重抄一份
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => this.syncHighlight())
+    }
   },
   beforeUnmount() {
     document.removeEventListener('pointerdown', this.handlePressStart, true)
@@ -468,6 +530,13 @@ export default {
     document.removeEventListener('selectionchange', this.onDocumentSelectionChange, true)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     document.removeEventListener('keydown', this.handleKeydown, true)
+    window.removeEventListener('resize', this.onHighlightResize)
+    if (this._hlRaf) cancelAnimationFrame(this._hlRaf)
+    this._hlRaf = 0
+    if (this._hlTextarea) this._hlTextarea.removeEventListener('scroll', this.onHighlightScroll)
+    this._hlRO?.disconnect()
+    this._hlTextarea = null
+    this._hlBackdrop = null
     this.stopCloseCountdown()
   },
   computed: {
@@ -605,6 +674,12 @@ export default {
     },
   },
   watch: {
+    // 正文一动就重画高亮底层。翻日期、插入小节走的都是 content，不用每个入口单独调。
+    // 走 rAF 合并：auto-grow 改高度、浏览器滚到光标都发生在排版之后，
+    // 在 nextTick 里量只能量到旧的，这正是字多时下面一半消失的原因
+    content() {
+      this.scheduleHighlightSync()
+    },
     // 正文一动就把预览推给展示板。存盘不归这里管——预览只是给外面看，
     // 真正写盘只发生在 handleClose
     drafts: {
@@ -740,6 +815,9 @@ export default {
       this.$nextTick(() => {
         this.focusInput()
         this.updateCurrentLine()
+        this.syncHighlight()
+        // 对话框有出现动画，排版定下来以后再对一遍
+        this.scheduleHighlightSync()
       })
     },
     focusInput() {
@@ -847,6 +925,82 @@ export default {
     getTextarea() {
       const ref = this.$refs.inputRef
       return ref ? ref.$el.querySelector('textarea') : null
+    },
+    // 高亮底层：textarea 文字设透明（CSS 里），真正看见的颜色由垫在底下的 div 画。
+    // 元素是 JS 现造的，塞进 Vuetify 那个 field 里面、盖在 textarea 正下方
+    ensureHighlight() {
+      const textarea = this.getTextarea()
+      if (!textarea) return false
+      if (this._hlTextarea !== textarea) {
+        if (this._hlTextarea) {
+          this._hlTextarea.removeEventListener('scroll', this.onHighlightScroll)
+          this._hlRO?.unobserve(this._hlTextarea)
+        }
+        this._hlTextarea = textarea
+        textarea.addEventListener('scroll', this.onHighlightScroll)
+        // auto-grow 改高度、窗口缩放改宽度都走这里，时序不用猜
+        this._hlRO?.observe(textarea)
+        const backdrop = document.createElement('div')
+        // 普通行的颜色也和正文一致，取最高强调
+        backdrop.className = 'hw-highlight text-high-emphasis'
+        backdrop.setAttribute('aria-hidden', 'true')
+        const host = textarea.closest('.v-field__field') || textarea.parentElement
+        host.insertBefore(backdrop, textarea)
+        this._hlBackdrop = backdrop
+        this._hlWidth = 0
+      }
+      return true
+    },
+    // 把 textarea 的字形和几何抄给高亮层：两边字不对齐，换行位置就对不上。
+    // 只抄影响排版的那些，颜色不管——高亮层自己的颜色就是要画的东西
+    copyHighlightStyle() {
+      const textarea = this._hlTextarea
+      const backdrop = this._hlBackdrop
+      if (!textarea || !backdrop) return
+      const computed = window.getComputedStyle(textarea)
+      for (const key of HIGHLIGHT_TEXT_PROPS) {
+        backdrop.style[key] = computed[key]
+      }
+      backdrop.style.padding = computed.padding
+      backdrop.style.top = `${textarea.offsetTop}px`
+      backdrop.style.left = `${textarea.offsetLeft}px`
+      backdrop.style.width = `${textarea.offsetWidth}px`
+      this._hlWidth = textarea.offsetWidth
+    },
+    // 重画一次高亮：内容、框高、滚动位置一起同步。
+    // auto-grow 会改框高，超 104px 后框内会滚，这两处每次都重新对
+    syncHighlight() {
+      if (!this.ensureHighlight()) return
+      const textarea = this._hlTextarea
+      const backdrop = this._hlBackdrop
+      if (textarea.offsetWidth !== this._hlWidth) this.copyHighlightStyle()
+      backdrop.style.height = `${textarea.clientHeight}px`
+      backdrop.innerHTML = buildHighlightHtml(this.content)
+      backdrop.scrollTop = textarea.scrollTop
+      backdrop.scrollLeft = textarea.scrollLeft
+    },
+    // 重画请求合并到下一帧：一帧里不管触发多少次（输入、滚动、尺寸变化），
+    // 只在排版之后量一次、画一次，量到的高度和滚动位置才是最新的
+    scheduleHighlightSync() {
+      if (this._hlRaf) return
+      this._hlRaf = requestAnimationFrame(() => {
+        this._hlRaf = 0
+        this.syncHighlight()
+      })
+    },
+    // 框内滚动时高亮层跟着滚，不然滚下去颜色就错位了。
+    // 直接抄一份立刻跟上，再排一帧校准（滚动那一刻底层可能还没画到最新）
+    onHighlightScroll() {
+      if (!this._hlTextarea || !this._hlBackdrop) return
+      this._hlBackdrop.scrollTop = this._hlTextarea.scrollTop
+      this._hlBackdrop.scrollLeft = this._hlTextarea.scrollLeft
+      this.scheduleHighlightSync()
+    },
+    // 窗口缩放：宽度变了换行位置全变，几何重抄（内容重画顺带发生）
+    onHighlightResize() {
+      if (!this.dialogVisible) return
+      this._hlWidth = 0
+      this.scheduleHighlightSync()
     },
     // 关闭时把所有改动过的日期一起交回去，不只是当前看得见的那天。
     // 完成编辑这一刻顺便把正文里的「预定」标记落实掉：标记行以下的内容
@@ -1514,10 +1668,55 @@ export default {
 .hw-area :deep(textarea) {
   scrollbar-width: none;
   -ms-overflow-style: none;
+  /* 高亮底层画颜色，textarea 只留光标和选区：文字本身透明。
+     提到高亮层上面来，光标和选区才不会被底下的字盖住 */
+  position: relative;
+  z-index: 1;
+  color: transparent;
+  background-color: transparent;
   /* 面板在下面折行占掉不少高度，编辑框不能无限长：正文一长就顶出屏幕，
      推荐按钮全看不见了。封顶之后正文在框里滚。约四行 */
   max-height: 104px;
   overflow-y: auto;
+}
+
+/* 高亮底层的宿主：Vuetify 那个 field，几何（top/left/宽/内边距）在 JS 里抄 */
+.hw-area :deep(.v-field__field) {
+  position: relative;
+}
+
+.hw-area :deep(.hw-highlight) {
+  position: absolute;
+  overflow: hidden;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* 一行一格；空行靠 <br> 撑高度。
+   折行规则不写死，从 backdrop 上继承（JS 全量抄的 textarea 实测值），
+   写死一个跟 textarea 不一样的，英文长串两边断行就错开 */
+.hw-area :deep(.hl-line) {
+}
+
+/* 只改颜色不改字重，字一粗换行就对不上了 */
+.v-theme--light .hw-area :deep(textarea) {
+  /* textarea 自己的文字已透明，这里只定光标：取 Vuetify 浅色主题正文同色 */
+  caret-color: rgba(0, 0, 0, 0.87);
+}
+
+.v-theme--dark .hw-area :deep(textarea) {
+  caret-color: #fff;
+}
+
+/* 高亮颜色：只改颜色不改字重，字一粗换行就对不上了。
+   起步是「今天的作业」那对色（灰 medium-emphasis、黄 yellow），
+   灰往下压一档、黄往上提一档 */
+.v-theme--dark .hw-area :deep(.hl-head) {
+  color: #A9A9A9;
+}
+
+.v-theme--dark .hw-area :deep(.hl-date) {
+  color: #FFEB3B;
 }
 
 .hw-area :deep(textarea::-webkit-scrollbar) {
