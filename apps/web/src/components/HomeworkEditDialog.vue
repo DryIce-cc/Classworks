@@ -8,12 +8,15 @@
     persistent
   >
     <v-card border>
-      <!-- 顶部倒计条：一动不动就自动关掉，防的是误触打开。
-           打开后先给 IDLE_CLOSE_DELAY；动过一次以后改成 IDLE_CLOSE_RESET_DELAY，
-           之后每动一次都重新起算。key 换掉让条重新挂载，动画才从头走。
-           页面看不见时整轮作废，回来一律从 IDLE_CLOSE_RESET_DELAY 重新起算 -->
+      <!-- 顶部倒计条：停手一会儿就自动关掉，防的是误触打开。
+           一直在，卡片顶边常驻；倒计还剩超过 COUNTDOWN_BAR_DELAY 时满格不动，
+           剩不到时才从满格往下走，走完正好赶上关闭。中途一动立刻收回满格 -->
       <div v-if="countdownActive" class="close-countdown">
-        <div :key="countdownKey" class="close-countdown-bar" :style="closeCountdownStyle" />
+        <div
+          class="close-countdown-bar"
+          :class="{ 'close-countdown-bar-drain': countdownBarDraining }"
+          :style="closeCountdownStyle"
+        />
       </div>
 
       <v-card-title class="hw-title">
@@ -346,6 +349,11 @@ const NEAR_PADDING = 15
 const IDLE_CLOSE_DELAY = 7000
 // 动过一次之后的倒计时长：之后再无动作 15s 关闭，有动作就重置成这个值重新算
 const IDLE_CLOSE_RESET_DELAY = 15000
+// 倒计只剩这么多秒时，顶上那条细线才挂出来，此前卡片的顶边干干净净。
+// 挂出来就是满格，往下走完正好赶上关闭，中途一动就收回去重新算
+const COUNTDOWN_BAR_DELAY = 7000
+// 倒计定时器醒来的间隔。够密，条出现那一刻的误差看不出来；够疏，白跑的轮询少
+const COUNTDOWN_TICK = 200
 // 正文末尾留几个空行，方便接着写下一条。面板从「继续添加作业」卡片进来时会抬到 2
 // （appendBlankLines），但那是「另起一份」的排版需求，只对正在编辑的那天成立
 const DEFAULT_BLANK_LINES = 1
@@ -466,18 +474,23 @@ export default {
       // null，所以另外记一个「有没有选区」——小键盘感知里「单选」就是靠它
       hasSelection: false,
       pickerOpen: false,
-      // 顶部倒计条是否在走，false 表示已经不需要倒计了
+      // 顶部倒计条是否挂着。倒计一起就在，直到面板关闭
       countdownActive: false,
-      // 当前这一轮倒计的时长，条的动画跟它对齐
-      countdownDelay: IDLE_CLOSE_DELAY,
-      // 每起一轮换一个，条靠 key 重新挂载才能从头开始走
-      countdownKey: 0,
+      // 条是否在往下走：倒计剩不到 COUNTDOWN_BAR_DELAY 才是。从满格起走，
+      // 走完这一轮正好赶上关闭，中途一动立刻收回满格
+      countdownBarDraining: false,
+      // 这一轮从满格走到空要多久：起走那一刻到关闭还剩多少，动画时长跟它对齐
+      countdownBarDuration: 0
     }
   },
   created() {
     // 按下位置，不进响应式：只是用来判断这一下算不算「点击空白」
     this._press = null
     this._closeTimer = 0
+    // 这一轮倒计的截止时刻（Date.now() 口径），不同时钟口径的 Date.now 和
+    // 定时器的单调时钟可能差几十毫秒，条走完和自动关闭就对不上了。
+    // 非响应式：轮询自己算，不需要触发重渲染
+    this._closeDeadline = 0
     // 目标日的存档正文，日期 -> Promise。预览每敲一个字都要用，不能每次都去等
     // IndexedDB，所以连 Promise 一起存着，并发调用自然共用同一次读取
     this._baseCache = {}
@@ -498,11 +511,14 @@ export default {
     document.addEventListener('pointerdown', this.handlePressStart, true)
     document.addEventListener('pointerup', this.handlePressEnd, true)
     document.addEventListener('pointercancel', this.cancelPress, true)
-    // 任何一点动静都把倒计推倒重来：按下、按键、滚轮统统算「有人在用面板」，
+    // 任何一点动静都把倒计推倒重来：按下、按键、滚轮、挪鼠标统统算「有人在用面板」，
     // 重来以后一律按 IDLE_CLOSE_RESET_DELAY 走。同样走捕获阶段，焦点落到面板外也照样收得到。
+    // 鼠标移动也在这份名单里：只是把光标挪到某个词上、还没按下去，人也还在用这个面板。
+    // pointermove 一秒能来几十次，但动一动只是把截止时刻往后推一个数，很便宜
     document.addEventListener('pointerdown', this.resetCloseCountdown, true)
     document.addEventListener('keydown', this.resetCloseCountdown, true)
     document.addEventListener('wheel', this.resetCloseCountdown, { capture: true, passive: true })
+    document.addEventListener('pointermove', this.resetCloseCountdown, { capture: true, passive: true })
     // 选区变化不一定都有 mouseup/click 配对（拖选中途、键盘扩选、还有原生工具）。
     // selectionchange 是唯一兜得住的口子——但页面上任何选区都触发它，
     // 所以只认焦点落在我们这个 textarea 上的情况
@@ -526,6 +542,7 @@ export default {
     document.removeEventListener('pointerdown', this.resetCloseCountdown, true)
     document.removeEventListener('keydown', this.resetCloseCountdown, true)
     document.removeEventListener('wheel', this.resetCloseCountdown, true)
+    document.removeEventListener('pointermove', this.resetCloseCountdown, true)
     document.removeEventListener('selectionchange', this.onDocumentSelectionChange, true)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     document.removeEventListener('keydown', this.handleKeydown, true)
@@ -667,9 +684,9 @@ export default {
     canEndLine() {
       return hasContent(this.currentLine)
     },
-    // 倒计条的动画时长跟定时器用同一个值，两边才不会差半拍
+    // 条挂出来那一刻到关闭还剩多久，动画就走多久，两边不会差半拍
     closeCountdownStyle() {
-      return { animationDuration: `${this.countdownDelay}ms` }
+      return { animationDuration: `${this.countdownBarDuration}ms` }
     },
   },
   watch: {
@@ -703,41 +720,63 @@ export default {
     },
   },
   methods: {
-    // 顶部倒计条：一动不动就自动关掉，防的是误触打开。
+    // 顶部倒计条：停手一会儿就自动关掉，防的是误触打开。
     // 打开那一刻起先按 IDLE_CLOSE_DELAY 算，读存档的耗时也算在这段里；
     // 动过一次之后改按 IDLE_CLOSE_RESET_DELAY 算，之后每动一次都重新起算——
     // 面板一直有人用就一直不关，停手 15s 才关。
     // 撤/重来的动作挂在 document 捕获阶段，所以按钮、浮层挡在前面也照样收得到。
-    // 条走完靠 CSS 动画，和这里的定时器同时起步，不会出现条没走完就关。
+    //
+    // 只用一个轮询定时器，不给关闭单独挂 setTimeout：动一动就把截止时刻往后推，
+    // 推的动作多到不值得为它反复开关一个定时器（pointermove 一秒能来几十次）。
+    // 轮询醒来时自己算还剩多少，到点了关，剩下不到一段就把条挂出来。
     startCloseCountdown(delay = IDLE_CLOSE_DELAY) {
       this.stopCloseCountdown()
+      this._closeDeadline = performance.now() + delay
       this.countdownActive = true
-      this.countdownDelay = delay
-      this.countdownKey += 1
-      this._closeTimer = window.setTimeout(() => {
-        this._closeTimer = 0
-        this.countdownActive = false
-        this.handleClose()
-      }, delay)
+      this._closeTimer = window.setInterval(this.tickCloseCountdown, COUNTDOWN_TICK)
+      this.tickCloseCountdown()
     },
 
     stopCloseCountdown() {
-      if (this._closeTimer) window.clearTimeout(this._closeTimer)
+      if (this._closeTimer) window.clearInterval(this._closeTimer)
       this._closeTimer = 0
+      this._closeDeadline = 0
       this.countdownActive = false
+      this.countdownBarDraining = false
     },
 
-    // 有人动了：倒计推倒重来，从此按 IDLE_CLOSE_RESET_DELAY 走。
-    // 面板没开着（定时器早清了）就什么都不做，白名单外的按键（比如修饰键）也照样算数
+    // 轮询醒来：到点了关面板；剩下不到 COUNTDOWN_BAR_DELAY 才让条往下走。
+    // 提前于那一刻满格不动，不是一个从头就开始的进度——看着像还早着才像
+    tickCloseCountdown() {
+      if (!this._closeTimer) return
+      const left = this._closeDeadline - performance.now()
+      if (left <= 0) {
+        this.stopCloseCountdown()
+        this.handleClose()
+        return
+      }
+      const drain = left <= COUNTDOWN_BAR_DELAY
+      // 只在起走的那一刻改一次 duration：这一轮里条得一直走完，
+      // 每轮重算会让动画时长一直跳，视觉上是条在抖
+      if (drain !== this.countdownBarDraining) {
+        this.countdownBarDraining = drain
+        if (drain) this.countdownBarDuration = left
+      }
+    },
+
+    // 有人动了：截止时刻推到 IDLE_CLOSE_RESET_DELAY 之后，条收回满格。
+    // 面板没开着（定时器早清了）就什么都不做，白名单外的按键（比如修饰键）也照样算数。
+    // 值本来是 false 时这次赋值不会触发重渲染
     resetCloseCountdown() {
       if (!this._closeTimer) return
-      this.startCloseCountdown(IDLE_CLOSE_RESET_DELAY)
+      this._closeDeadline = performance.now() + IDLE_CLOSE_RESET_DELAY
+      this.countdownBarDraining = false
     },
 
     // 页面看不见时（切了标签页、窗口最小化或被完全遮住）不计表：
     // 人在别处忙不算「一动不动」，回来反而该重罚，所以从头给一整段
     // IDLE_CLOSE_RESET_DELAY，不再按误触的 IDLE_CLOSE_DELAY 算。
-    // 条也跟着重来——startCloseCountdown 换 key 会让它重新挂载，正好从满格走
+    // 条也跟着重来——startCloseCountdown 会把它收回满格，重新等最后那一段
     handleVisibilityChange() {
       if (document.hidden) {
         this.stopCloseCountdown()
@@ -1605,7 +1644,8 @@ export default {
 
 <style scoped>
 /* 顶部倒计条：贴在卡片顶边的一条细线，倒计走完就自动关掉面板。
-   颜色取 currentColor 再压到很低的透明度，深色下是浅灰、浅色下是深灰，不抢注意力 */
+   一直挂着，剩得还久时就是满格的一条细线，不抢注意力。
+   颜色取 currentColor 再压到很低的透明度，深色下是浅灰、浅色下是深灰 */
 .close-countdown {
   position: absolute;
   top: 0;
@@ -1622,13 +1662,17 @@ export default {
   background: currentColor;
   opacity: 0.2;
   transform-origin: left center;
+}
+
+/* 倒计进入最后一段才挂上这个类，动画才从头走一遍。类一撤，条立刻回到满格 */
+.close-countdown-bar-drain {
   animation-name: close-countdown-drain;
   animation-timing-function: linear;
   /* forwards：走完后停在空处，不会闪回满格 */
   animation-fill-mode: forwards;
 }
 
-/* 时长由 closeCountdownStyle 绑进来，和自动关闭用的是同一个值 */
+/* 时长由 closeCountdownStyle 绑进来，取的是起走那一刻到关闭还剩的时间 */
 @keyframes close-countdown-drain {
   from {
     transform: scaleX(1);
@@ -1777,9 +1821,10 @@ export default {
 }
 
 /* 有前缀/后缀文字的那一行（「作为 … 的作业」）：词只占它自己那么宽，
-   后缀紧跟在词后面，不推到行的最右边去 */
+   后缀紧跟在词后面，不推到行的最右边去。
+   空间不够时也不许压缩词：整行的收缩量全给后缀，让它截成省略号 */
 .phrase-row-affix .phrase-chips {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 
 /* 「作为」「的作业」这类固定文字，不是按钮 */
@@ -1797,6 +1842,16 @@ export default {
 .phrase-affix-prefix {
   margin-left: 4px;
   padding-left: 12px;
+}
+
+/* 后缀（「的作业」）允许被挤窄：词排满一行时它不能顶出面板，
+   宁可自己截成省略号。min-width:0 是 flex 项能缩到内容宽度以下的开关 */
+.phrase-affix-suffix {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :deep(.v-chip) {
