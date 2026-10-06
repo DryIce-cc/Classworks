@@ -11,8 +11,6 @@ const settingsDefinitions = {
     type: 'number',
     default: 18,
     validate: (value) => value >= 16 && value <= 32,
-    description: '字体大小',
-    icon: 'mdi-format-size',
   },
 }
 
@@ -75,7 +73,6 @@ class SettingsManagerClass {
       return false
     }
     try {
-      const oldValue = this.settingsCache[key]
       if (typeof value !== definition.type) {
         value =
           definition.type === 'boolean'
@@ -102,30 +99,6 @@ class SettingsManagerClass {
     }
   }
 
-  resetSetting(key) {
-    if (!this.isInitialized) this.init()
-    const definition = settingsDefinitions[key]
-    if (!definition) {
-      console.warn(`未定义的设置项: ${key}`)
-      return
-    }
-    this.settingsCache[key] = definition.default
-    this.saveSettings()
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: { key, value: definition.default } }),
-      )
-    }
-  }
-
-  resetAllSettings() {
-    this.settingsCache = {}
-    for (const [key, definition] of Object.entries(settingsDefinitions)) {
-      this.settingsCache[key] = definition.default
-    }
-    this.saveSettings()
-  }
-
   watchSettings(callback) {
     if (typeof window === 'undefined') return () => {}
     const storageHandler = (event) => {
@@ -144,10 +117,6 @@ class SettingsManagerClass {
       window.removeEventListener(SETTINGS_CHANGED_EVENT, customHandler)
     }
   }
-
-  getSettingDefinition(key) {
-    return settingsDefinitions[key] || null
-  }
 }
 
 const SettingsManager = new SettingsManagerClass()
@@ -158,17 +127,6 @@ if (typeof window !== 'undefined') {
 
 const getSetting = (key) => SettingsManager.getSetting(key)
 const setSetting = (key, value) => SettingsManager.setSetting(key, value)
-const resetSetting = (key) => SettingsManager.resetSetting(key)
-const resetAllSettings = () => SettingsManager.resetAllSettings()
 const watchSettings = (callback) => SettingsManager.watchSettings(callback)
-const getSettingDefinition = (key) => SettingsManager.getSettingDefinition(key)
 
-export {
-  settingsDefinitions,
-  getSetting,
-  setSetting,
-  resetSetting,
-  resetAllSettings,
-  watchSettings,
-  getSettingDefinition,
-}
+export { getSetting, setSetting, watchSettings }

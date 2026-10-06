@@ -5,12 +5,12 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "vite --host",
-    "build": "vite build && node scripts/copy-404.js",
+    "build": "vite build && node scripts/verify-styles.js && node scripts/copy-404.js",
     "preview": "vite preview",
     "pwa:validate": "node scripts/validate-pwa-build.js"
   },
   "dependencies": {
-    "@mdi/font": "7.4.47",
+    "@mdi/js": "7.4.47",
     "idb": "^8.0.3",
     "vue": "^3.5.25",
     "vue-router": "^4.6.3",
