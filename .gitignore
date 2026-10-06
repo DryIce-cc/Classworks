@@ -73,6 +73,7 @@ vite.config.*.timestamp-*.mjs
 auto-imports.d.ts
 components.d.ts
 typed-router.d.ts
+.eslintrc-auto-import.json
 
 # Package lock files (using pnpm)
 package-lock.json

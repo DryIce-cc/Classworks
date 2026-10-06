@@ -88,7 +88,6 @@
               ref="inputRef"
               v-model="content"
               auto-grow
-              placeholder="使用换行表示分条"
               rows="5"
               class="hw-area"
               @click="scheduleCurrentLine"

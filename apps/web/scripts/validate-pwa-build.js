@@ -129,16 +129,20 @@ if (!fs.existsSync(serviceWorkerPath)) {
   fail('dist/sw.js 不存在，PWA 离线能力未生成。')
 } else {
   const sw = fs.readFileSync(serviceWorkerPath, 'utf8')
-  if (!sw.includes('sw-cache-manager.js')) {
-    fail('sw.js 未导入 sw-cache-manager.js。')
-  }
   if (!sw.includes('index.html')) {
     fail('sw.js 未包含导航回退，离线打开应用可能失败。')
   }
-}
-
-if (!fs.existsSync(path.join(distDir, 'sw-cache-manager.js'))) {
-  fail('dist/sw-cache-manager.js 不存在。')
+  if (!sw.includes('clientsClaim')) {
+    fail('sw.js 未开启 clientsClaim，新版本可能无法立刻接管已打开的页面。')
+  }
+  // 预缓存表里同一个文件出现两次会让 sw.js 体积翻倍、还要多占一份缓存配额，
+  // 通常是 globPatterns 和 manifest 自动追加的条目撞上了
+  const entries = sw.match(/\{url:"[^"]+",revision:(?:"[^"]*"|null)\}/g) ?? []
+  const urls = entries.map((entry) => entry.split('"')[1])
+  const duplicated = [...new Set(urls.filter((url, i) => urls.indexOf(url) !== i))]
+  if (duplicated.length > 0) {
+    fail(`sw.js 预缓存表里有重复条目：${duplicated.join(', ')}`)
+  }
 }
 
 if (errors.length > 0) {

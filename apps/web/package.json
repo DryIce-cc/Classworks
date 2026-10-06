@@ -10,22 +10,20 @@
     "pwa:validate": "node scripts/validate-pwa-build.js"
   },
   "dependencies": {
-    "@mdi/js": "7.4.47",
     "idb": "^8.0.3",
     "vue": "^3.5.25",
     "vue-router": "^4.6.3",
     "vuetify": "^3.11.0"
   },
   "devDependencies": {
+    "@mdi/js": "7.4.47",
     "@vitejs/plugin-vue": "^6.0.2",
     "sass-embedded": "^1.93.3",
     "unplugin-auto-import": "^20.3.0",
-    "unplugin-fonts": "^1.4.0",
     "unplugin-vue-components": "^30.0.0",
     "unplugin-vue-router": "^0.18.0",
     "vite": "^5.4.11",
     "vite-plugin-pwa": "^1.2.0",
-    "vite-plugin-vue-devtools": "^7.6.8",
     "vite-plugin-vue-layouts": "^0.11.0",
     "vite-plugin-vuetify": "^2.1.2"
   }

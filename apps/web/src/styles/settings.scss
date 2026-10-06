@@ -1,9 +1,104 @@
-/**
- * src/styles/settings.scss
- *
- * Configures Vuetify overwrites. Loaded through `vite.config.mjs`
- * (`vuetify({ styles: { configFile } })`), so it applies globally.
- */
+// Vuetify 全局 sass 配置。vite.config.mjs 里 vuetify({ styles: { configFile } })
+// 会把本文件当作组件样式的入口先加载，所以这里的 @use with 决定了所有 Vuetify 样式。
+//
+// 裁剪思路：Vuetify 默认给每个 utility 家族都生成 xs/sm/md/lg/xxl 五套断点变体，
+// 外加一整套 Material 调色板类，这些全站一个都没用上，却占了产物 CSS 的绝大部分。
+// 这里只保留 src 下真正出现过的类；改动前请先用 grep 确认模板里没有新增对应类名。
+@use 'vuetify/settings' with (
+  $utilities: (
+    // ---- 用到的家族：关掉断点变体，只留基础类 ----
+    // 模板里全是无断点前缀的类（d-flex / ma-1 / text-body-2 …），
+    // responsive: false 砍掉的 sm/md/lg/xl/xxl 版本没有任何一处会命中
+    'overflow': (responsive: false),
+    'overflow-x': (responsive: false),
+    'overflow-y': (responsive: false),
+    'display': (responsive: false, print: false),
+    'flex-direction': (responsive: false),
+    'flex-grow': (responsive: false),
+    'flex-shrink': (responsive: false),
+    'flex-wrap': (responsive: false),
+    'justify-content': (responsive: false),
+    'align-items': (responsive: false),
+    'align-self': (responsive: false),
+    'gap': (responsive: false),
+    'margin': (responsive: false),
+    'margin-top': (responsive: false),
+    'margin-right': (responsive: false),
+    'margin-bottom': (responsive: false),
+    'margin-left': (responsive: false),
+    // text-opacity(text-medium-emphasis) / text-overflow(text-truncate) /
+    // font-weight / cursor / float / justify-content 这些家族默认就不生成断点变体，
+    // 不需要在这里出现，列出反而要小心：map-deep-merge 收到空 map 会把整个家族清空
+    'text-align': (responsive: false),
+    'typography': (responsive: false),
+
+    // ---- 整个家族都不要 ----
+    // padding 系列模板里全靠自有 SCSS；rounded/elevation 走组件默认样式
+    'float': false,
+    'float:rtl': false,
+    'float:ltr': false,
+    'justify-items': false,
+    'align-content': false,
+    'order': false,
+    'gap-row': false,
+    'gap-column': false,
+    'margin-x': false,
+    'margin-y': false,
+    'margin-start': false,
+    'margin-end': false,
+    'negative-margin': false,
+    'negative-margin-x': false,
+    'negative-margin-y': false,
+    'negative-margin-top': false,
+    'negative-margin-right': false,
+    'negative-margin-bottom': false,
+    'negative-margin-left': false,
+    'negative-margin-start': false,
+    'negative-margin-end': false,
+    'padding': false,
+    'padding-x': false,
+    'padding-y': false,
+    'padding-top': false,
+    'padding-right': false,
+    'padding-bottom': false,
+    'padding-left': false,
+    'padding-start': false,
+    'padding-end': false,
+    'rounded': false,
+    'rounded-top': false,
+    'rounded-end': false,
+    'rounded-bottom': false,
+    'rounded-start': false,
+    'rounded-top-start': false,
+    'rounded-top-end': false,
+    'rounded-bottom-end': false,
+    'rounded-bottom-start': false,
+    'border': false,
+    'border-current': false,
+    'border-opacity': false,
+    'border-top': false,
+    'border-end': false,
+    'border-bottom': false,
+    'border-start': false,
+    'border-style': false,
+    'text-decoration': false,
+    'white-space': false,
+    'overflow-wrap': false,
+    'opacity': false,
+    'text-transform': false,
+    'font-italic': false,
+    'text-mono': false,
+    'position': false,
+    'top': false,
+    'right': false,
+    'bottom': false,
+    'left': false,
+    'fill-height': false,
+    'height': false,
+    'height-screen': false,
+    'width': false,
+  )
+);
 
 @media (max-width: 600px) {
   .v-container {

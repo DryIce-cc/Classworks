@@ -7,6 +7,10 @@
 // Styles
 // 不再引 @mdi/font 的图标字体（约 820KB，7400+ 字形，这里只用 22 个）。
 // 改用 SVG：路径见 icons/mdi.js，装机体积和首屏都受益
+//
+// 这个入口只带 settings/generic/elements/utilities，组件样式由
+// vite-plugin-vuetify 按需注入。utility 家族在 styles/settings.scss 里按
+// 模板实际用到的类裁掉了大半，所以这里保持引整份即可，不必逐个 @use
 import 'vuetify/styles'
 
 // Composables

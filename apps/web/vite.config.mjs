@@ -1,7 +1,6 @@
 // Plugins
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
-import Fonts from 'unplugin-fonts/vite'
 import Layouts from 'vite-plugin-vue-layouts'
 import Vue from '@vitejs/plugin-vue'
 import VueRouter from 'unplugin-vue-router/vite'
@@ -11,7 +10,6 @@ import { VitePWA } from 'vite-plugin-pwa'
 // Utilities
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
-import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
@@ -33,13 +31,19 @@ export default defineConfig(({ command }) => ({
       lang: 'zh-CN',
       injectRegister: 'auto',
       strategies: 'generateSW',
+      // manifest.webmanifest 和 manifest.icons 里的图标，插件已经按
+      // includeManifestIcons 自动追加进预缓存，这里补的是 icons 之外的两个
+      // （mask-icon、apple-touch-icon）；插件会去重，manifest 文件本身不用列
+      includeAssets: ['pwa/**'],
       // sw.js 本身不要走 HTTP 缓存。默认的 'imports' 会让浏览器最长 24 小时
       // 直接拿缓存里的 sw.js 比对，新构建出来的改动半天都推不到浏览器上
       updateViaCache: 'none',
 
       workbox: {
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest,txt,json,woff2,ttf}'],
+        // 不 glob png/svg/webmanifest：这几个已经由上面的 includeAssets 和
+        // manifest 追加过，再 glob 一遍会在 sw.js 里留下重复条目
+        globPatterns: ['**/*.{js,css,html,ico,txt,json,woff2,ttf}'],
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
@@ -101,7 +105,6 @@ export default defineConfig(({ command }) => ({
         ],
         clientsClaim: true,
         skipWaiting: true,
-        importScripts: ['sw-cache-manager.js'],
       },
       manifest: {
         id: '7C24F2B3.ClassworksPWA',
@@ -173,21 +176,6 @@ export default defineConfig(({ command }) => ({
       directoryAsNamespace: false,
       globs: ['src/components/**/[A-Z]*.vue'],
     }),
-    Fonts({
-      google: {
-        // Roboto 只管拉丁字母和数字（汉字本来就走系统字体），但它后到的话
-        // 行高和折行位置都会变，整块作业板要重新分列一次，看着就是刷新后先乱动。
-        // optional 的意思是这次没赶上就用系统字体且不再替换：宁可第一次不用，
-        // 也不让首屏之后突然换字体
-        display: 'optional',
-        families: [
-          {
-            name: 'Roboto',
-            styles: 'wght@100;300;400;500;700;900',
-          },
-        ],
-      },
-    }),
     AutoImport({
       imports: ['vue', 'vue-router'],
       vueTemplate: true,
@@ -212,6 +200,13 @@ export default defineConfig(({ command }) => ({
         },
       },
     },
+  },
+  // legalComments: 'none' 会连 /*! … */ 和 /* @license … */ 这类法律声明一起删掉。
+  // esbuild 默认保留它们，产物里因此留着 Vue 和 ress.css 的版权头，浏览器
+  // DevTools 的 Sources 面板里能直接读到。注释本身不是秘密，但上线产物
+  // 带着别人的版权声明既不准确也显脏。
+  esbuild: {
+    legalComments: 'none',
   },
   server: {
     port: 3031,
