@@ -11,9 +11,14 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
 
+// 站点挂在 GitHub Pages 的子路径下（仓库名即路径），base 必须带上这一段，
+// 否则产物里的 /assets/... 会指到域名根，整站资源 404。
+// 下面 runtimeCaching 的匹配和 manifest 的 start_url/scope 都得跟着它走
+const BASE = '/Classworks/'
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
-  base: '/',
+  base: BASE,
   plugins: [
     VueRouter(),
     Layouts(),
@@ -47,8 +52,12 @@ export default defineConfig(({ command }) => ({
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
+            // 注意：这里的函数体会被 workbox 原样抄进 sw.js，闭包里的 BASE
+            // 在那边不存在，${BASE} 会留成字面量、这条规则永远匹配不上。
+            // 所以只能写死字面量，改 BASE 时记得连这里一起改
             urlPattern: ({ url, sameOrigin }) => {
-              return sameOrigin && url.pathname.startsWith('/assets/')
+              // 站点在子路径下，资源实际在 /Classworks/assets/... 而不是 /assets/...
+              return sameOrigin && url.pathname.startsWith('/Classworks/assets/')
             },
             handler: 'CacheFirst',
             options: {
@@ -64,7 +73,7 @@ export default defineConfig(({ command }) => ({
           },
           {
             urlPattern: ({ url, sameOrigin }) => {
-              return sameOrigin && url.pathname.startsWith('/pwa/')
+              return sameOrigin && url.pathname.startsWith('/Classworks/pwa/')
             },
             handler: 'StaleWhileRevalidate',
             options: {
@@ -85,8 +94,8 @@ export default defineConfig(({ command }) => ({
               const path = url.pathname
               // 排除已经由其他规则处理的路径
               return !(
-                path.includes('/assets/') ||
-                path.includes('/pwa/')
+                path.includes('/Classworks/assets/') ||
+                path.includes('/Classworks/pwa/')
               )
             },
             handler: 'NetworkFirst',
@@ -117,8 +126,9 @@ export default defineConfig(({ command }) => ({
         dir: 'ltr',
         display: 'standalone',
         display_override: ['window-controls-overlay', 'standalone', 'minimal-ui', 'fullscreen'],
-        start_url: '/',
-        scope: '/',
+        // 都在子路径下，填 '/' 的话装成应用后启动和作用域会落到域名根上（那边是空白页）
+        start_url: BASE,
+        scope: BASE,
         orientation: 'any',
         categories: ['education', 'productivity', 'utilities'],
         prefer_related_applications: false,
@@ -153,7 +163,7 @@ export default defineConfig(({ command }) => ({
           {
             name: '设置',
             short_name: '设置',
-            url: '/settings',
+            url: `${BASE}settings`,
             icons: [
               {
                 src: './pwa/image/pwa-64x64.png',
